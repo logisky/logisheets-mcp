@@ -1,7 +1,7 @@
 {
     "name": "logisheets-mcp",
     "version": "0.1.0",
-    "description": "An MCP server that gives an AI agent a real, Excel-compatible spreadsheet engine to compute in and remember in \u2014 deterministic formulas, structured block memory addressed by (block, key, field), and a real .xlsx out.",
+    "description": "An MCP server that gives an AI agent a real, Excel-compatible spreadsheet engine to compute in and remember in — deterministic formulas, structured block memory addressed by (block, key, field), and a real .xlsx out.",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -27,8 +27,8 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "logisheets-logician": "file:../LogiSheets/packages/logician",
-        "logisheets-runtime": "file:../LogiSheets/packages/runtime"
+        "logisheets-logician": "^1.11.0",
+        "logisheets-runtime": "^1.11.0"
     },
     "devDependencies": {
         "@types/node": "^22",
