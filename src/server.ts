@@ -20,6 +20,7 @@ import type {
 import type {Tool, ToolContext} from 'logisheets-logician'
 import {WorkbookSession} from './session.js'
 import {selectTools, toolModeFromEnv, type ToolMode} from './surface.js'
+import {validateToolInput} from './validate.js'
 
 export const SERVER_NAME = 'logisheets'
 export const SERVER_VERSION = '0.1.0'
@@ -122,6 +123,19 @@ export function createServer(opts: CreateServerOptions = {}): CreatedServer {
                     content: [
                         {type: 'text', text: `unknown tool: ${request.params.name}`},
                     ],
+                    isError: true,
+                }
+            }
+
+            // Check arguments against the tool's declared schema first. Nothing
+            // else does — the SDK passes `arguments` through untouched — so a
+            // wrong parameter name would otherwise surface as whatever
+            // TypeError the handler happens to throw, naming neither the tool
+            // nor the parameter the agent got wrong.
+            const invalid = validateToolInput(tool, request.params.arguments)
+            if (invalid !== undefined) {
+                return {
+                    content: [{type: 'text', text: invalid}],
                     isError: true,
                 }
             }
