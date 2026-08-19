@@ -271,12 +271,25 @@ async function main() {
     check('row added after reload computes', stillLive.get('2026')?.revenue, 22000)
 
     // Formulas, not baked numbers — that is the difference between a live model
-    // and a screenshot of one. Checked against the file's own bytes, because
-    // this is a claim about what Excel will see, not about what the server says.
-    //
-    // (`get_cells` reports no formula for these cells after a reload — the tool
-    // surface reads the recomputed value, not the stored expression. The file is
-    // the authority here, and it has them.)
+    // and a screenshot of one. Checked twice: what the reopened workbook reports,
+    // and what the file itself contains. The second is the one that settles it,
+    // since the claim is about what Excel will see rather than what the server
+    // says it wrote.
+    const summaryAt = await call('describe_block', {name: 'summary'})
+    const reread = await call('get_cells', {
+        sheetIdx: summaryAt.sheet_idx,
+        startRow: summaryAt.position.row,
+        startCol: summaryAt.position.col,
+        endRow: summaryAt.position.row + summaryAt.row_count - 1,
+        endCol: summaryAt.position.col + summaryAt.col_count - 1,
+    })
+    const live = reread.cells.filter((c) => c.formula?.includes('BLOCKREFS'))
+    check(
+        'the reopened workbook still knows both totals are formulas',
+        live.length,
+        2
+    )
+
     const xlsx = await readFile(outFile)
     const sheets = worksheetParts(xlsx)
     const formulas = sheets
