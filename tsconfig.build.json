@@ -1,0 +1,7 @@
+{
+    // Build config: same options, but tests are typechecked (see tsconfig.json)
+    // rather than shipped.
+    "extends": "./tsconfig.json",
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/**/*.test.ts"]
+}

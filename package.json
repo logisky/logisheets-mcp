@@ -1,0 +1,63 @@
+{
+    "name": "logisheets-mcp",
+    "version": "0.1.0",
+    "description": "An MCP server that gives an AI agent a real, Excel-compatible spreadsheet engine to compute in and remember in \u2014 deterministic formulas, structured block memory addressed by (block, key, field), and a real .xlsx out.",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+        "logisheets-mcp": "./dist/cli.js"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "link:local": "node scripts/link-local.mjs",
+        "prepack": "yarn build",
+        "release:deps": "node scripts/release-deps.mjs"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.30.0",
+        "logisheets-logician": "file:../LogiSheets/packages/logician",
+        "logisheets-runtime": "file:../LogiSheets/packages/runtime"
+    },
+    "devDependencies": {
+        "@types/node": "^22",
+        "typescript": "^5.7.0",
+        "vitest": "^3.2.6"
+    },
+    "files": [
+        "dist"
+    ],
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "claude",
+        "agent",
+        "llm",
+        "spreadsheet",
+        "xlsx",
+        "excel",
+        "formula",
+        "logisheets"
+    ],
+    "author": "Jeremy He",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/logisky/logisheets-mcp.git"
+    },
+    "bugs": {
+        "url": "https://github.com/logisky/logisheets-mcp/issues"
+    },
+    "homepage": "https://github.com/logisky/logisheets-mcp#readme"
+}
