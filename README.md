@@ -84,6 +84,20 @@ The agent creates a block, fills it, writes the formulas, and hands back a file.
 The numbers are the engine's, not the model's guesses — and the `.xlsx` has real
 formulas in it, so you can change an assumption in Excel and watch it recompute.
 
+## See it work
+
+```bash
+npm run build && npm run demo
+```
+
+Builds a small revenue model over real MCP-on-stdio against `dist/cli.js` — the
+same code path Claude Desktop drives — and checks every claim as it goes: totals
+the engine computed, a rule that reaches rows added later, blocks that keep
+resolving after the model grows underneath them, and a real `.xlsx` whose
+formulas are verified by reading the file's own bytes. No LLM is involved; the
+engine is the subject, and hard-coding the calls is what makes the guarantees
+checkable rather than a story about a chat session.
+
 ## The agent loop
 
 ```
