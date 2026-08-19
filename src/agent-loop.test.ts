@@ -258,6 +258,66 @@ describe('logisheets-mcp agent loop', () => {
         expect(a3?.formula).toContain('SUM')
     })
 
+    it('keeps a field rule alive across save and reload', async () => {
+        // A field rule is a TEMPLATE, not a one-off write: every row, including
+        // rows added later, is computed from it. So the template itself has to
+        // survive the file, or the workbook silently stops being live — values
+        // still sitting there, new rows coming back blank.
+        //
+        // It regressed exactly that way: the engine wrote the template into an
+        // XML attribute without escaping it, and `#FIELD("units")` — the
+        // documented syntax, always quoted — terminated the attribute at its
+        // first quote. It reloaded as `#FIELD(` and computed nothing.
+        const rule = '=#FIELD("units")*#FIELD("price")'
+        await call('create_block', {
+            sheet: 'Model',
+            name: 'revenue',
+            position: {row: 0, col: 0},
+            fields: [
+                {name: 'year'},
+                {name: 'units', field_type: 'number'},
+                {name: 'price', field_type: 'number'},
+                {name: 'total', field_type: 'number'},
+            ],
+            initial_rows: [{key: '2024', values: {units: 100, price: 9.5}}],
+        })
+        await call('set_field_rule', {
+            block: 'revenue',
+            field: 'total',
+            value_formula: rule,
+        })
+
+        const out = join(dir, 'rule.xlsx')
+        await call('save_workbook', {path: out})
+        await call('open_workbook', {path: out})
+
+        type Described = {
+            fields: Array<{name: string; value_formula?: string | null}>
+            rows?: Array<{key: string; values: Record<string, unknown>}>
+        }
+
+        // The template came back intact, quotes and all.
+        const after = await call<Described>('describe_block', {
+            name: 'revenue',
+            include_rows: true,
+        })
+        const total = after.fields.find((f) => f.name === 'total')
+        expect(total?.value_formula).toBe('#FIELD("units")*#FIELD("price")')
+
+        // The proof that matters: a row added AFTER the reload still computes.
+        await call('add_block_rows', {
+            block: 'revenue',
+            rows: [{key: '2025', values: {units: 200, price: 12}}],
+        })
+        const grown = await call<Described>('describe_block', {
+            name: 'revenue',
+            include_rows: true,
+        })
+        const byKey = new Map(grown.rows?.map((r) => [r.key, r.values]))
+        expect(byKey.get('2024')?.total).toBe(950)
+        expect(byKey.get('2025')?.total).toBe(2400)
+    })
+
     it('rejects a range straddling a block boundary without dying', async () => {
         // A `Range` is wholly normal or wholly one block's, so B1:B10 with B1
         // inside a block has no representation. The engine used to panic here,

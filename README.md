@@ -189,6 +189,11 @@ npm test
 engine changes take effect without reinstalling. `scripts/release-deps.mjs`
 flips them back to registry ranges before publishing.
 
+Right now `link:local` is **required** for the full test suite, not just
+convenient: the field-rule round-trip test needs an engine fix that has not
+been released yet, so it fails against the published `logisheets` on npm. That
+goes away with the next LogiSheets release.
+
 ## State model
 
 One MCP session holds one active workbook, alive across tool calls — that
