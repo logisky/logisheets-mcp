@@ -121,7 +121,7 @@ block cell semantically.
 
 ### The full surface
 
-Set `LOGISHEETS_MCP_TOOLS=full` for ~48 tools: undo/redo, cell formatting,
+Set `LOGISHEETS_MCP_TOOLS=full` for 50 tools: undo/redo, cell formatting,
 merges, comments, checkpoints, block move/resize, cross-block links,
 validation-violation inspection, and raw row/column structure.
 
