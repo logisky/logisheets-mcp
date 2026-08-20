@@ -111,7 +111,7 @@ save_workbook                   hand the human a real .xlsx
 
 ## Tools
 
-The default surface is deliberately small — 14 tools. Tool-selection accuracy
+The default surface is deliberately small — 15 tools. Tool-selection accuracy
 falls as the list grows, and every description costs context on every turn.
 
 | Tool | What it does |
@@ -127,6 +127,7 @@ falls as the list grows, and every description costs context on every turn.
 | `delete_block_rows` | Remove records. |
 | `set_block_cells` | Write cells by `(block, row_key, field)`. Batched, atomic. |
 | `set_field_rule` | Give a field a formula, a validation rule, or an editability rule. |
+| `list_violations` | Which cells break their field's validation rule, and why. |
 | `create_sheet` | Add a sheet. |
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
@@ -136,8 +137,8 @@ block cell semantically.
 ### The full surface
 
 Set `LOGISHEETS_MCP_TOOLS=full` for 50 tools: undo/redo, cell formatting,
-merges, comments, checkpoints, block move/resize, cross-block links,
-validation-violation inspection, and raw row/column structure.
+merges, comments, checkpoints, block move/resize, cross-block links, and raw
+row/column structure.
 
 ```json
 {

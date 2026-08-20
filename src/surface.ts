@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 14 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 15 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -59,6 +59,10 @@ const CORE_IDS: readonly string[] = [
     // Raw-cell escape hatch
     'cell__get_cells',
     'cell__set_cells',
+    // `set_field_rule` can attach a validation rule, and this is the only way
+    // to see what breaks it — without it, validation is write-only and the
+    // agent has no way to check its own work.
+    'inspect__list_violations',
 ]
 
 /**
