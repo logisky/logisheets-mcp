@@ -151,7 +151,13 @@ export function createServer(opts: CreateServerOptions = {}): CreatedServer {
             }
 
             try {
-                const result = await tool.handler(request.params.arguments ?? {}, ctx)
+                // One workbook, one lane. Handlers read state and then write it
+                // across an await, and the host may have several calls in
+                // flight, so without this they interleave and lose. See
+                // WorkbookSession.run.
+                const result = await session.run(() =>
+                    tool.handler(request.params.arguments ?? {}, ctx)
+                )
                 if (result.canceled === true) {
                     return {
                         content: [{type: 'text', text: 'canceled'}],

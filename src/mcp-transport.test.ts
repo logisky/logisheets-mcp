@@ -184,6 +184,69 @@ describe('MCP protocol surface', () => {
         expect(text(ok as CallToolResult)).toContain('2')
     })
 
+    it('serializes concurrent calls instead of letting them race', async () => {
+        // MCP does not promise to serialize: JSON-RPC allows pipelining and the
+        // SDK dispatches concurrently. Handlers read state and then write it
+        // across an await — `create_block` checks whether its sheet exists and
+        // creates it if not — so three in flight at once each saw the sheet
+        // missing, each tried to create it, and two failed with a bare
+        // "status code 1".
+        const results = await Promise.all(
+            ['alpha', 'beta', 'gamma'].map((name, i) =>
+                client.callTool({
+                    name: 'create_block',
+                    arguments: {
+                        sheet: 'Shared',
+                        name,
+                        position: {row: i * 4, col: 0},
+                        fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+                        initial_rows: [{key: 'r1', values: {v: i}}],
+                    },
+                })
+            )
+        )
+        for (const r of results) {
+            expect(text(r as CallToolResult)).not.toContain('status code')
+            expect(r.isError).toBeFalsy()
+        }
+
+        // All three landed, each with its own block id — the sheet was created
+        // exactly once.
+        const listed = await client.callTool({name: 'list_blocks', arguments: {}})
+        const groups = JSON.parse(
+            text(listed as CallToolResult).slice(
+                text(listed as CallToolResult).indexOf('[')
+            )
+        ) as Array<{blocks: Array<{name: string; block_id: number}>}>
+        const blocks = groups.flatMap((g) => g.blocks)
+        expect(blocks.map((b) => b.name).sort()).toEqual([
+            'alpha',
+            'beta',
+            'gamma',
+        ])
+        expect(new Set(blocks.map((b) => b.block_id)).size).toBe(3)
+    })
+
+    it("relays the engine's own reason for a rejected transaction", async () => {
+        // Every engine rejection is status code 1, so the code alone says
+        // nothing. The reason now rides along on the effect.
+        const {server} = createServer({mode: 'full', log: () => {}})
+        const host = new Client({name: 'test-host-full', version: '0.0.0'})
+        const [c, s2] = InMemoryTransport.createLinkedPair()
+        await Promise.all([server.connect(s2), host.connect(c)])
+
+        await host.callTool({name: 'open_workbook', arguments: {}})
+        const bad = await host.callTool({
+            name: 'delete_sheet',
+            arguments: {idx: 9},
+        })
+        expect(bad.isError).toBe(true)
+        const msg = text(bad as CallToolResult)
+        expect(msg).toContain('exceeds the maximum')
+        expect(msg).not.toContain('status code')
+        await host.close()
+    })
+
     it('reports an unknown tool without dropping the connection', async () => {
         const missing = await client.callTool({
             name: 'no_such_tool',

@@ -33,6 +33,39 @@ export interface SaveResult {
 export class WorkbookSession {
     private readonly runtime = new SpreadsheetRuntime()
     private active: Workbook | undefined
+    /** Tail of the serialization chain — see {@link run}. */
+    private lane: Promise<unknown> = Promise.resolve()
+
+    /**
+     * Run `fn` after everything already queued on this session, and before
+     * anything queued later. One workbook, one lane.
+     *
+     * Tool handlers are read-then-write against shared state: `create_block`
+     * asks whether its sheet exists and creates it if not; it asks the engine
+     * for a free block id and then claims it. Those are two awaits with a gap
+     * in between, and MCP does not promise to serialize requests — JSON-RPC
+     * allows pipelining and the SDK dispatches concurrently. Three
+     * `create_block` calls in flight at once therefore each saw the sheet
+     * missing, each tried to create it, and two failed.
+     *
+     * Serializing costs nothing here. The engine is a single synchronous WASM
+     * instance, so concurrent handlers never bought throughput — they only
+     * interleaved. Reads are queued too: a read overlapping a half-applied
+     * transaction would report state that never existed.
+     *
+     * Not reentrant. Wrap once, at the dispatch boundary; a handler that called
+     * back into `run` would wait on itself forever.
+     */
+    public run<T>(fn: () => Promise<T>): Promise<T> {
+        // Run `fn` whether or not its predecessor settled cleanly, then keep the
+        // lane resolved so one failed tool call can't poison the queue.
+        const result = this.lane.then(fn, fn)
+        this.lane = result.then(
+            () => undefined,
+            () => undefined
+        )
+        return result
+    }
 
     /**
      * The active workbook, created empty on first touch.
