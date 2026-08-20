@@ -17,6 +17,30 @@
 import type {Tool} from 'logisheets-logician'
 import type {OpenResult, SaveResult, WorkbookSession} from './session.js'
 
+/**
+ * The active workbook, addressable as an MCP resource.
+ *
+ * A tool result goes into the model's context, so returning the file itself
+ * there costs roughly 1.4 KB of text per KB of workbook and teaches the model
+ * nothing. The protocol's answer is a resource: the tool returns a *link* — uri,
+ * mime type, size — and a host that wants the bytes fetches them with
+ * `resources/read`, outside the conversation. That is how the workbook gets
+ * handed back without the model paying for it.
+ */
+export const WORKBOOK_URI = 'workbook://current.xlsx'
+
+/** The OOXML spreadsheet media type, as Excel and every host expect it. */
+export const XLSX_MIME =
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/**
+ * Tools whose result should carry a link to the workbook, so the host can offer
+ * the finished file to the human.
+ */
+export const TOOLS_YIELDING_WORKBOOK: ReadonlySet<string> = new Set([
+    'save_workbook',
+])
+
 export interface OpenWorkbookInput {
     path?: string
     xlsx_base64?: string
@@ -89,7 +113,9 @@ function saveWorkbook(
         description: [
             'Write the workbook to a real .xlsx file the human can open in Excel. This is how you hand your work back — do it when the task is done.',
             '',
-            'Defaults to the path the workbook was opened from (overwriting it); pass `path` to write somewhere else. Everything is saved: values, formulas (live and recalculating in Excel), and the block structure.',
+            'Defaults to the path it was opened from, or last saved to; pass `path` to write somewhere else. Everything is saved: values, formulas (live and recalculating in Excel), and the block structure.',
+            '',
+            'The result carries a link to the workbook rather than its bytes, so the host can offer the human the file without any of it passing through your context.',
         ].join('\n'),
         // Writes to the filesystem: not a workbook mutation, but very much an
         // effect on the world, so hosts should gate it.
@@ -123,7 +149,7 @@ function exportXlsx(
         description: [
             'Return the workbook as base64-encoded .xlsx bytes.',
             '',
-            'Only for hosts with no shared filesystem — the result lands in your context and costs roughly 1.4 KB of text per KB of file. Use `save_workbook` whenever you can write to disk.',
+            'Last resort. The bytes land in your context and cost roughly 1.4 KB of text per KB of file. Prefer `save_workbook`, which writes a real file and hands the host a link to it — the host can give the human the workbook without any of it passing through you.',
         ].join('\n'),
         mutates: false,
         confirmation: 'never',

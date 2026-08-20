@@ -35,6 +35,9 @@ export class WorkbookSession {
     private active: Workbook | undefined
     /** Tail of the serialization chain — see {@link run}. */
     private lane: Promise<unknown> = Promise.resolve()
+    /** Where {@link saveTo} last wrote, so the workbook resource can be named
+     *  after the file the human is actually being handed. */
+    private lastSaved: string | undefined
 
     /**
      * Run `fn` after everything already queued on this session, and before
@@ -85,9 +88,13 @@ export class WorkbookSession {
         return this.workbook.client
     }
 
-    /** Path the active workbook was opened from, if any. */
+    /**
+     * The file this workbook belongs to: where it was last saved, else where it
+     * was opened from. Undefined for a scratch workbook that has never been
+     * written.
+     */
     public get path(): string | undefined {
-        return this.workbook.path
+        return this.lastSaved ?? this.workbook.path
     }
 
     /** True once a workbook exists — i.e. anything has touched the session. */
@@ -135,6 +142,7 @@ export class WorkbookSession {
         // closing it then would release the workbook we just "opened".
         const previous = this.active
         this.active = next
+        this.lastSaved = undefined
         if (previous !== undefined && previous !== next) {
             this.runtime.close(previous)
         }
@@ -156,7 +164,9 @@ export class WorkbookSession {
      * Returns the absolute path actually written and the file size.
      */
     public async saveTo(path?: string): Promise<SaveResult> {
-        const target = path ?? this.workbook.path
+        // `this.path`, not `workbook.path`: a second bare save should go back to
+        // wherever the last one went, even for a workbook that started empty.
+        const target = path ?? this.path
         if (target === undefined) {
             throw new Error(
                 'no path given, and this workbook was not opened from a file — ' +
@@ -165,6 +175,7 @@ export class WorkbookSession {
         }
         const absolute = resolve(target)
         await this.workbook.saveAs(absolute)
+        this.lastSaved = absolute
         // Size from disk rather than a second `save()` — serializing a whole
         // workbook twice just to report a number is not worth it.
         return {path: absolute, bytes: (await stat(absolute)).size}
@@ -183,6 +194,7 @@ export class WorkbookSession {
     public close(): void {
         this.runtime.closeAll()
         this.active = undefined
+        this.lastSaved = undefined
     }
 }
 

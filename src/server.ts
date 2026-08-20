@@ -11,7 +11,9 @@
 import {Server} from '@modelcontextprotocol/sdk/server/index.js'
 import {
     CallToolRequestSchema,
+    ListResourcesRequestSchema,
     ListToolsRequestSchema,
+    ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import type {
     CallToolResult,
@@ -21,6 +23,11 @@ import type {Tool, ToolContext} from 'logisheets-logician'
 import {WorkbookSession} from './session.js'
 import {selectTools, toolModeFromEnv, type ToolMode} from './surface.js'
 import {validateToolInput} from './validate.js'
+import {
+    TOOLS_YIELDING_WORKBOOK,
+    WORKBOOK_URI,
+    XLSX_MIME,
+} from './lifecycle.js'
 
 export const SERVER_NAME = 'logisheets'
 export const SERVER_VERSION = '0.1.0'
@@ -107,8 +114,55 @@ export function createServer(opts: CreateServerOptions = {}): CreatedServer {
 
     const server = new Server(
         {name: SERVER_NAME, version: SERVER_VERSION},
-        {capabilities: {tools: {}}, instructions: INSTRUCTIONS}
+        {
+            capabilities: {tools: {}, resources: {}},
+            instructions: INSTRUCTIONS,
+        }
     )
+
+    // The workbook as a resource. This is how the finished file reaches the
+    // human: `save_workbook` returns a link, and a host that wants the bytes
+    // reads them here — outside the model's context, so a 200 KB workbook costs
+    // the conversation nothing.
+    server.setRequestHandler(ListResourcesRequestSchema, async () => {
+        if (!session.isOpen) return {resources: []}
+        return {
+            resources: [
+                {
+                    uri: WORKBOOK_URI,
+                    name: session.path ?? 'workbook.xlsx',
+                    title: 'The active workbook',
+                    description:
+                        'The workbook this session is working in, serialized as a real .xlsx.',
+                    mimeType: XLSX_MIME,
+                    // Marked for the human: it is a file to open, not text to
+                    // reason over.
+                    annotations: {audience: ['user']},
+                },
+            ],
+        }
+    })
+
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        if (request.params.uri !== WORKBOOK_URI) {
+            throw new Error(`unknown resource: ${request.params.uri}`)
+        }
+        // Serialize through the same lane as the tools, so a read can't observe
+        // a half-applied transaction.
+        const {base64, bytes} = await session.run(async () =>
+            session.exportBase64()
+        )
+        return {
+            contents: [
+                {
+                    uri: WORKBOOK_URI,
+                    mimeType: XLSX_MIME,
+                    blob: base64,
+                    _meta: {bytes},
+                },
+            ],
+        }
+    })
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: [...tools.values()].map(toMcpTool),
@@ -176,6 +230,20 @@ export function createServer(opts: CreateServerOptions = {}): CreatedServer {
                 }
                 if (content.length === 0) {
                     content.push({type: 'text', text: 'ok'})
+                }
+                // Hand back a reference to the file, not the file. The host can
+                // turn this into a download for the human; the model just sees a
+                // short link.
+                if (TOOLS_YIELDING_WORKBOOK.has(tool.name)) {
+                    content.push({
+                        type: 'resource_link',
+                        uri: WORKBOOK_URI,
+                        name: session.path ?? 'workbook.xlsx',
+                        mimeType: XLSX_MIME,
+                        description:
+                            'The saved workbook. Read this resource to get the .xlsx bytes.',
+                        annotations: {audience: ['user']},
+                    })
                 }
                 return {content}
             } catch (err) {

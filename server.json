@@ -1,0 +1,31 @@
+{
+    "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    "name": "io.github.logisky/logisheets-mcp",
+    "title": "LogiSheets",
+    "description": "A real, Excel-compatible spreadsheet engine an agent can compute in and remember in, with a genuine .xlsx out. Deterministic formulas instead of arithmetic the model guessed at, and named blocks addressed by (block, row key, field) so structure survives the agent's own edits.",
+    "websiteUrl": "https://docs.logisheets.com/",
+    "repository": {
+        "url": "https://github.com/logisky/logisheets-mcp",
+        "source": "github"
+    },
+    "version": "0.1.0",
+    "packages": [
+        {
+            "registryType": "npm",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "identifier": "logisheets-mcp",
+            "version": "0.1.0",
+            "transport": {
+                "type": "stdio"
+            },
+            "environmentVariables": [
+                {
+                    "name": "LOGISHEETS_MCP_TOOLS",
+                    "description": "Tool surface: 'core' (default, 14 tools) or 'full', which adds formatting, comments, links, undo/redo and raw structure operations.",
+                    "isRequired": false,
+                    "isSecret": false
+                }
+            ]
+        }
+    ]
+}

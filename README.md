@@ -208,6 +208,27 @@ convenient: the field-rule round-trip test needs an engine fix that has not
 been released yet, so it fails against the published `logisheets` on npm. That
 goes away with the next LogiSheets release.
 
+## Getting the file back
+
+`save_workbook` writes a real `.xlsx` and its result carries an MCP
+**resource link** — a uri, media type and size — not the file. The workbook is
+also listed as a resource (`workbook://current.xlsx`), so a host that wants the
+bytes reads them with `resources/read` and hands the human a download.
+
+That split is the point: a tool result goes into the model's context, where a
+200 KB workbook would cost roughly 280 KB of text and teach the model nothing.
+The link costs a line. `export_xlsx` still returns base64 for hosts that
+implement no resources at all, but it is the fallback, not the mechanism.
+
+Reads go through the same serialization lane as tool calls, so a host fetching
+the file can never catch a half-applied transaction.
+
+`open_workbook` and `save_workbook` read and write wherever the server process
+can — normal for a local stdio server, and the same posture as the official
+filesystem server. Both are marked as mutating so a host can prompt before they
+run; if you need tighter limits, run the server as a user with only the access
+you intend it to have.
+
 ## State model
 
 One MCP session holds one active workbook, alive across tool calls — that

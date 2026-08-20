@@ -12,6 +12,7 @@ import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js'
 import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js'
 import {afterEach, beforeEach, describe, expect, it} from 'vitest'
 import {createServer, INSTRUCTIONS} from './server.js'
+import {WORKBOOK_URI, XLSX_MIME} from './lifecycle.js'
 import type {WorkbookSession} from './session.js'
 
 /** First text block of a tool result. */
@@ -244,6 +245,60 @@ describe('MCP protocol surface', () => {
         const msg = text(bad as CallToolResult)
         expect(msg).toContain('exceeds the maximum')
         expect(msg).not.toContain('status code')
+        await host.close()
+    })
+
+    it('hands the workbook back as a resource, not as bytes in the reply', async () => {
+        // A tool result goes into the model's context, so returning the file
+        // there costs ~1.4 KB of text per KB of workbook and teaches the model
+        // nothing. The protocol's answer is a resource: the tool returns a link,
+        // and the host reads the bytes out of band.
+        await client.callTool({name: 'open_workbook', arguments: {}})
+        await client.callTool({
+            name: 'set_cells',
+            arguments: {
+                sheetIdx: 0,
+                cells: [{row: 0, col: 0, content: '=6*7'}],
+            },
+        })
+
+        const out = join(dir, 'handed-back.xlsx')
+        const saved = await client.callTool({
+            name: 'save_workbook',
+            arguments: {path: out},
+        })
+        const link = (saved as CallToolResult).content.find(
+            (c) => c.type === 'resource_link'
+        )
+        expect(link).toBeDefined()
+        expect((link as {uri: string}).uri).toBe(WORKBOOK_URI)
+        expect((link as {mimeType?: string}).mimeType).toBe(XLSX_MIME)
+        // Named after the file the human is being handed.
+        expect((link as {name: string}).name).toBe(out)
+        // The reply itself stays small — no base64 payload rode along.
+        const text = JSON.stringify((saved as CallToolResult).content)
+        expect(text.length).toBeLessThan(1000)
+
+        // The resource is listed...
+        const {resources} = await client.listResources()
+        expect(resources.map((r) => r.uri)).toContain(WORKBOOK_URI)
+
+        // ...and reading it yields a real .xlsx, formula and all.
+        const read = await client.readResource({uri: WORKBOOK_URI})
+        const blob = read.contents[0] as {blob: string; mimeType?: string}
+        expect(blob.mimeType).toBe(XLSX_MIME)
+        const bytes = Buffer.from(blob.blob, 'base64')
+        expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04])
+        expect(bytes.length).toBeGreaterThan(1000)
+    })
+
+    it('offers no resource until a workbook exists', async () => {
+        const {server} = createServer({mode: 'core', log: () => {}})
+        const host = new Client({name: 'test-host-fresh', version: '0.0.0'})
+        const [c, s2] = InMemoryTransport.createLinkedPair()
+        await Promise.all([server.connect(s2), host.connect(c)])
+        const {resources} = await host.listResources()
+        expect(resources).toEqual([])
         await host.close()
     })
 
