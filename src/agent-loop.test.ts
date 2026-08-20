@@ -404,6 +404,80 @@ describe('logisheets-mcp agent loop', () => {
         expect(described.rows?.[0]?.values.total).toBe(25)
     })
 
+    it('refuses duplicates that would break semantic addressing', async () => {
+        // `(block, row_key, field)` IS the addressing scheme, so a duplicate at
+        // any level makes some cell unreachable — and makes aggregates wrong
+        // rather than merely odd. With two rows keyed "a", BLOCKREFS resolved
+        // the first one twice and skipped the other: a block holding 1, 2 and
+        // 99 summed to 4. Nothing complained.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'ledger',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [
+                {key: 'a', values: {v: 1}},
+                {key: 'b', values: {v: 2}},
+            ],
+        })
+
+        // A second block under the same ref name would make every BLOCKREF to
+        // it ambiguous, which surfaces as #VALUE! at evaluation time.
+        await expect(
+            call('create_block', {
+                sheet: 'S',
+                name: 'ledger',
+                position: {row: 20, col: 0},
+                fields: [{name: 'k'}, {name: 'v'}],
+                initial_rows: [{key: 'x'}],
+            })
+        ).rejects.toThrow(/already exists/)
+
+        await expect(
+            call('create_block', {
+                sheet: 'S',
+                name: 'dup_fields',
+                position: {row: 30, col: 0},
+                fields: [{name: 'k'}, {name: 'v'}, {name: 'v'}],
+                initial_rows: [{key: 'x'}],
+            })
+        ).rejects.toThrow(/field name/)
+
+        await expect(
+            call('create_block', {
+                sheet: 'S',
+                name: 'dup_keys',
+                position: {row: 40, col: 0},
+                fields: [{name: 'k'}, {name: 'v'}],
+                initial_rows: [{key: 's'}, {key: 's'}],
+            })
+        ).rejects.toThrow(/row key/)
+
+        // Appending a key the block already has, and repeating one in a batch.
+        await expect(
+            call('add_block_rows', {
+                block: 'ledger',
+                rows: [{key: 'a', values: {v: 99}}],
+            })
+        ).rejects.toThrow(/already has the row key/)
+        await expect(
+            call('add_block_rows', {
+                block: 'ledger',
+                rows: [{key: 'z'}, {key: 'z'}],
+            })
+        ).rejects.toThrow(/repeat the key/)
+
+        // A genuinely new key still appends, and the total is the real total.
+        await call('add_block_rows', {
+            block: 'ledger',
+            rows: [{key: 'c', values: {v: 3}}],
+        })
+        const total = await call<{value: unknown}>('eval_formula', {
+            expr: '=SUM(BLOCKREFS("ledger","*","v"))',
+        })
+        expect(total.value).toBe(6)
+    })
+
     it('rejects a range straddling a block boundary without dying', async () => {
         // A `Range` is wholly normal or wholly one block's, so B1:B10 with B1
         // inside a block has no representation. The engine used to panic here,
