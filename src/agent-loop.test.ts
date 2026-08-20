@@ -7,9 +7,10 @@
  * arguments — so they exercise the same path a host does, minus the transport.
  */
 
-import {mkdtemp, rm, readFile} from 'node:fs/promises'
+import {mkdtemp, rm, readFile, copyFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {fileURLToPath} from 'node:url'
+import {join, resolve, dirname} from 'node:path'
 import {afterEach, beforeEach, describe, expect, it} from 'vitest'
 import type {Tool, ToolContext} from 'logisheets-logician'
 import {createServer} from './server.js'
@@ -316,6 +317,91 @@ describe('logisheets-mcp agent loop', () => {
         const byKey = new Map(grown.rows?.map((r) => [r.key, r.values]))
         expect(byKey.get('2024')?.total).toBe(950)
         expect(byKey.get('2025')?.total).toBe(2400)
+    })
+
+    it("works on a file the user brought without destroying it", async () => {
+        // The scenario the product is sold on: open the human's real .xlsx, add
+        // something, hand it back. A file a user brings has NO blocks, which is
+        // exactly why this went wrong — `list_blocks` derived its suggested
+        // position from blocks alone, so it said row 0, and `create_block`
+        // silently overwrote the first row the agent was told to build on.
+        const src = resolve(
+            dirname(fileURLToPath(import.meta.url)),
+            '..',
+            '..',
+            'LogiSheets',
+            'tests',
+            '6.xlsx'
+        )
+        const work = join(dir, 'brought-by-user.xlsx')
+        await copyFile(src, work)
+
+        await call('open_workbook', {path: work})
+        type Grid = {cells: Array<{ref: string; value: unknown}>}
+        const before = await call<Grid>('get_cells', {
+            sheetIdx: 0,
+            startRow: 0,
+            startCol: 0,
+            endRow: 25,
+            endCol: 5,
+        })
+        expect(before.cells.length).toBeGreaterThan(0)
+
+        // The suggested position must clear the content, not just the blocks.
+        const groups = await call<
+            Array<{next_block_start: {row: number; col: number}}>
+        >('list_blocks')
+        const hint = groups[0]?.next_block_start
+        expect(hint).toBeDefined()
+        expect(hint!.row).toBeGreaterThan(0)
+
+        // And landing on the data is refused however the agent got there.
+        await expect(
+            call('create_block', {
+                sheet: 'Control',
+                name: 'onto_data',
+                position: {row: 0, col: 0},
+                fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+                initial_rows: [{key: 'r1', values: {v: 1}}],
+            })
+        ).rejects.toThrow(/already hold data/)
+
+        await call('create_block', {
+            sheet: 'Control',
+            name: 'analysis',
+            position: hint,
+            fields: [
+                {name: 'metric'},
+                {name: 'units', field_type: 'number'},
+                {name: 'price', field_type: 'number'},
+                {name: 'total', field_type: 'number'},
+            ],
+            initial_rows: [{key: 'q1', values: {units: 10, price: 2.5}}],
+        })
+        await call('set_field_rule', {
+            block: 'analysis',
+            field: 'total',
+            value_formula: '=#FIELD("units")*#FIELD("price")',
+        })
+
+        await call('save_workbook', {path: work})
+        await call('open_workbook', {path: work})
+
+        // Their content came back exactly as it went in.
+        const after = await call<Grid>('get_cells', {
+            sheetIdx: 0,
+            startRow: 0,
+            startCol: 0,
+            endRow: 25,
+            endCol: 5,
+        })
+        expect(after.cells).toEqual(before.cells)
+
+        // And the work the agent added computed and survived.
+        const described = await call<{
+            rows?: Array<{key: string; values: Record<string, unknown>}>
+        }>('describe_block', {name: 'analysis', include_rows: true})
+        expect(described.rows?.[0]?.values.total).toBe(25)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
