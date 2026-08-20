@@ -106,14 +106,16 @@ function openWorkbook(session: WorkbookSession): Tool<
 
 function saveWorkbook(
     session: WorkbookSession
-): Tool<{path?: string}, SaveResult> {
+): Tool<{path?: string; resolve_block_refs?: boolean}, SaveResult> {
     return {
         namespace: 'workbook',
         name: 'save_workbook',
         description: [
             'Write the workbook to a real .xlsx file the human can open in Excel. This is how you hand your work back — do it when the task is done.',
             '',
-            'Defaults to the path it was opened from, or last saved to; pass `path` to write somewhere else. Everything is saved: values, formulas (live and recalculating in Excel), and the block structure.',
+            'Defaults to the path it was opened from, or last saved to; pass `path` to write somewhere else. Values, formulas and the block structure are all saved.',
+            '',
+            'IMPORTANT — if the human is going to work on this in Excel, pass `resolve_block_refs: true`. Formulas that read blocks are written as BLOCKREF/BLOCKREFS, which only LogiSheets understands: Excel shows the saved numbers but turns those cells into #NAME? the moment it recalculates. Resolving rewrites them as ordinary A1 references so Excel can recompute the model. Leave it off when the file is coming back here — the named form is readable and survives rows moving.',
             '',
             'The result carries a link to the workbook rather than its bytes, so the host can offer the human the file without any of it passing through your context.',
         ].join('\n'),
@@ -128,13 +130,25 @@ function saveWorkbook(
                     description:
                         'Destination .xlsx path. Defaults to the path the workbook was opened from.',
                 },
+                resolve_block_refs: {
+                    type: 'boolean',
+                    default: false,
+                    description:
+                        'Rewrite BLOCKREF/BLOCKREFS as ordinary A1 references. Set this when the human will open the file in Excel; Excel has no BLOCKREF function and would show #NAME? on recalculation. One-way: a resolved file is an export, not a round trip.',
+                },
             },
         },
         handler: async (input) => {
-            const result = await session.saveTo(input.path)
+            const result = await session.saveTo(input.path, {
+                resolveBlockRefs: input.resolve_block_refs === true,
+            })
             return {
                 data: result,
-                display: `Saved ${result.bytes} bytes to ${result.path}`,
+                display:
+                    `Saved ${result.bytes} bytes to ${result.path}` +
+                    (input.resolve_block_refs === true
+                        ? ' (block formulas resolved to A1 — Excel can recalculate it)'
+                        : ''),
             }
         },
     }

@@ -163,7 +163,10 @@ export class WorkbookSession {
      * Write the workbook to `path`, defaulting to where it was opened from.
      * Returns the absolute path actually written and the file size.
      */
-    public async saveTo(path?: string): Promise<SaveResult> {
+    public async saveTo(
+        path?: string,
+        opts: {resolveBlockRefs?: boolean} = {}
+    ): Promise<SaveResult> {
         // `this.path`, not `workbook.path`: a second bare save should go back to
         // wherever the last one went, even for a workbook that started empty.
         const target = path ?? this.path
@@ -174,7 +177,7 @@ export class WorkbookSession {
             )
         }
         const absolute = resolve(target)
-        await this.workbook.saveAs(absolute)
+        await this.workbook.saveAs(absolute, '', opts.resolveBlockRefs ?? false)
         this.lastSaved = absolute
         // Size from disk rather than a second `save()` — serializing a whole
         // workbook twice just to report a number is not worth it.
@@ -182,8 +185,8 @@ export class WorkbookSession {
     }
 
     /** Serialize the workbook to base64 `.xlsx` for transports with no shared disk. */
-    public exportBase64(): {base64: string; bytes: number} {
-        const data = this.workbook.save()
+    public exportBase64(resolveBlockRefs = false): {base64: string; bytes: number} {
+        const data = this.workbook.save('', resolveBlockRefs)
         return {
             base64: Buffer.from(data).toString('base64'),
             bytes: data.length,

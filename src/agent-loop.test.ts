@@ -9,6 +9,7 @@
 
 import {mkdtemp, rm, readFile, copyFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
+import {inflateRawSync} from 'node:zlib'
 import {fileURLToPath} from 'node:url'
 import {join, resolve, dirname} from 'node:path'
 import {afterEach, beforeEach, describe, expect, it} from 'vitest'
@@ -38,6 +39,27 @@ function makeCaller(session: WorkbookSession, tools: Map<string, Tool>) {
         })
         return result.data as T
     }
+}
+
+/** Every worksheet part of an .xlsx, concatenated. An .xlsx is a zip; reading
+ *  the bytes is the only way to check what another spreadsheet would see. */
+function worksheetXml(buf: Buffer): string {
+    let i = 0
+    let out = ''
+    while (i + 30 <= buf.length && buf.readUInt32LE(i) === 0x04034b50) {
+        const method = buf.readUInt16LE(i + 8)
+        const size = buf.readUInt32LE(i + 18)
+        const nameLen = buf.readUInt16LE(i + 26)
+        const extraLen = buf.readUInt16LE(i + 28)
+        const name = buf.subarray(i + 30, i + 30 + nameLen).toString('utf8')
+        const start = i + 30 + nameLen + extraLen
+        const data = buf.subarray(start, start + size)
+        if (name.startsWith('xl/worksheets/sheet')) {
+            out += (method === 0 ? data : inflateRawSync(data)).toString('utf8')
+        }
+        i = start + size
+    }
+    return out
 }
 
 describe('logisheets-mcp agent loop', () => {
@@ -476,6 +498,55 @@ describe('logisheets-mcp agent loop', () => {
             expr: '=SUM(BLOCKREFS("ledger","*","v"))',
         })
         expect(total.value).toBe(6)
+    })
+
+    it('can save block formulas as coordinates for Excel', async () => {
+        // BLOCKREF is a LogiSheets function. Excel shows the saved numbers but
+        // turns those cells into #NAME? the moment it recalculates, so a file
+        // meant for Excel needs the coordinates instead. Both forms matter: the
+        // named one is readable and reopens here intact, so neither is "the"
+        // default for every purpose — the caller chooses.
+        await call('create_block', {
+            sheet: 'S',
+            name: 't',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [
+                {key: 'r1', values: {v: 10}},
+                {key: 'r2', values: {v: 20}},
+            ],
+        })
+        await call('set_cells', {
+            sheetIdx: 0,
+            cells: [
+                {row: 5, col: 0, content: '=BLOCKREF("t","r2","v")'},
+                {row: 5, col: 1, content: '=SUM(BLOCKREFS("t","*","v"))'},
+            ],
+        })
+
+        const named = join(dir, 'named.xlsx')
+        const excel = join(dir, 'excel.xlsx')
+        await call('save_workbook', {path: named})
+        await call('save_workbook', {path: excel, resolve_block_refs: true})
+
+        const formulasIn = async (file: string): Promise<string[]> => {
+            const xml = worksheetXml(await readFile(file))
+            return [...xml.matchAll(/<f>(.*?)<\/f>/g)].map((m) =>
+                (m[1] ?? '').replaceAll('&quot;', '"')
+            )
+        }
+
+        // Default keeps the names.
+        const kept = await formulasIn(named)
+        expect(kept.some((f) => f.includes('BLOCKREF('))).toBe(true)
+        expect(kept.some((f) => f.includes('BLOCKREFS('))).toBe(true)
+
+        // Resolved leaves nothing Excel cannot evaluate: the single ref becomes
+        // the cell it named, the scan becomes the range it covered.
+        const resolved = await formulasIn(excel)
+        expect(resolved.some((f) => f.includes('BLOCKREF'))).toBe(false)
+        expect(resolved).toContain('B2')
+        expect(resolved.some((f) => f.includes('B1:B2'))).toBe(true)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
