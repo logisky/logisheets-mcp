@@ -6,3 +6,5 @@ dist/
 
 # Demo output.
 out/
+# npm writes an auth token here on `npm login` / `npm publish`. Never commit it.
+.npmrc

@@ -1,0 +1,58 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # OIDC, for both the MCP Registry login and npm provenance. No token
+      # needed for the registry — the workflow's own identity proves the
+      # io.github.logisky namespace.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          # Required for NODE_AUTH_TOKEN to reach npm; without it `npm publish`
+          # fails with ENEEDAUTH even though the secret is set.
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Before anything irreversible. `npm publish` spends a version number
+      # permanently, so a mismatch caught afterwards costs the next one.
+      # Holds package.json, both version fields in server.json, and the
+      # mcpName ↔ server name pair to the tag.
+      - name: Check the release is coherent
+        run: node scripts/check-release.mjs "${GITHUB_REF#refs/tags/}"
+
+      # --provenance links the published tarball to this commit and workflow,
+      # verifiable by anyone installing it. Needs the id-token permission above.
+      - name: Publish to npm
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to the MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      # Has to come after npm: the registry fetches the package to check its
+      # mcpName, so the version must already exist there.
+      - name: Publish to the MCP Registry
+        run: ./mcp-publisher publish

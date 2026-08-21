@@ -23,10 +23,12 @@
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "link:local": "node scripts/link-local.mjs",
-        "prepack": "yarn build",
+        "prepack": "npm run build",
         "release:deps": "node scripts/release-deps.mjs",
         "demo": "node examples/revenue-model.mjs",
-        "pretest": "yarn build"
+        "pretest": "npm run build",
+        "check-release": "node scripts/check-release.mjs",
+        "version": "node scripts/sync-server-json.mjs && git add server.json"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",

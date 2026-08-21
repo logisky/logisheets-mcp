@@ -252,6 +252,33 @@ That symlinks the three packages into `node_modules` so local engine changes
 take effect without reinstalling. `scripts/release-deps.mjs` puts the registry
 ranges back before publishing.
 
+### Releasing
+
+A tag does it. `.github/workflows/publish.yaml` runs the tests, publishes to
+npm with provenance, and registers the new version with the MCP Registry:
+
+```bash
+npm version 0.2.0        # bumps both files, commits, tags v0.2.0
+npm run check-release    # optional; CI runs it too
+git push --follow-tags
+```
+
+`npm version` also rewrites `server.json`, via the `version` lifecycle script.
+The registry keeps the version in two places — the server's own `version` and
+the version of the npm package it points at — and hand-editing them is the step
+most likely to be missed.
+
+`check-release` is the gate. Four things have to agree: the tag, `package.json`,
+and both `server.json` version fields. `mcpName` also has to equal
+`server.json`'s `name`, because the registry proves ownership by reading
+`mcpName` out of the *published* npm package. `npm publish` cannot be undone —
+a version number is spent the moment it lands — so the workflow runs this check
+before publishing, not after.
+
+Registry auth needs no secret: the workflow authenticates with GitHub OIDC,
+which is what grants the `io.github.logisky/` namespace. The one secret is
+`NPM_TOKEN`.
+
 ## Getting the file back
 
 `save_workbook` writes a real `.xlsx` and its result carries an MCP
