@@ -2,7 +2,7 @@
     "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
     "name": "io.github.logisky/logisheets-mcp",
     "title": "LogiSheets",
-    "description": "A real, Excel-compatible spreadsheet engine an agent can compute in and remember in, with a genuine .xlsx out. Deterministic formulas instead of arithmetic the model guessed at, and named blocks addressed by (block, row key, field) so structure survives the agent's own edits.",
+    "description": "An Excel-compatible spreadsheet engine for agents: deterministic formulas, block memory, real .xlsx.",
     "websiteUrl": "https://docs.logisheets.com/",
     "repository": {
         "url": "https://github.com/logisky/logisheets-mcp",
