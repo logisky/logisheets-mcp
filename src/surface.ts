@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 16 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 17 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -69,6 +69,11 @@ const CORE_IDS: readonly string[] = [
     // put back, which walks the model somewhere else if anything goes wrong
     // mid-scan — and a sensitivity scan is dozens of probes.
     'edit__preview_changes',
+    // Auditing a number and predicting the blast radius of an edit, from the
+    // engine's own dependency graph. The alternative is reading every formula
+    // in the workbook and parsing it — and that still cannot answer the reverse
+    // direction, which is the one you want before changing an assumption.
+    'inspect__trace',
 ]
 
 /**

@@ -82,7 +82,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(16)
+        expect(names).toHaveLength(17)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -695,6 +695,89 @@ describe('logisheets-mcp agent loop', () => {
         })
         expect(one.diff.some((d) => d.after === 21)).toBe(true)
         expect(await product()).toBe(6)
+    })
+
+    it('traces dependencies in both directions, and says how precise it is', async () => {
+        // The engine's trace only resolved normal ranges: every block cell and
+        // every BLOCKREF came back with no dependencies at all. "Nothing depends
+        // on this assumption" is the most dangerous possible wrong answer to
+        // give before an edit.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'assum',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [
+                {key: 'rate', values: {v: 3}},
+                {key: 'other', values: {v: 9}},
+            ],
+        })
+        await call('create_block', {
+            sheet: 'S',
+            name: 'proj',
+            position: {row: 6, col: 0},
+            fields: [
+                {name: 'k'},
+                {name: 'base', field_type: 'number'},
+                {name: 'scaled', field_type: 'number'},
+            ],
+            initial_rows: [{key: 'r1', values: {base: 10}}],
+        })
+        await call('set_field_rule', {
+            block: 'proj',
+            field: 'scaled',
+            value_formula: '=#FIELD("base")*BLOCKREF("assum","rate","v")',
+        })
+
+        type Traced = {
+            approximate?: boolean
+            precedents?: Array<{block: string | null; field: string | null; ref: string; scope: string}>
+            dependents?: Array<{block: string | null; row_key: string | null; field: string | null; scope: string}>
+        }
+
+        // Inside a block the graph is per-cell, so this is exact: no
+        // approximation flag, and the sibling is named rather than located.
+        const inside = await call<Traced>('trace', {
+            target: {block: 'proj', row_key: 'r1', field: 'scaled'},
+            direction: 'precedents',
+        })
+        const base = inside.precedents?.find((x) => x.field === 'base')
+        expect(base?.block).toBe('proj')
+        expect(base?.scope).toBe('cell')
+        // ...and it sees the BLOCKREF too, at field granularity.
+        expect(
+            inside.precedents?.some((x) => x.block === 'assum' && x.scope === 'field')
+        ).toBe(true)
+        expect(inside.approximate).toBe(true)
+
+        // The reverse direction is the one formula text cannot answer.
+        const reverse = await call<Traced>('trace', {
+            target: {block: 'assum', row_key: 'rate', field: 'v'},
+            direction: 'dependents',
+        })
+        expect(
+            reverse.dependents?.some(
+                (d) => d.block === 'proj' && d.field === 'scaled'
+            )
+        ).toBe(true)
+        // Block dependencies are tracked per field, not per row, so this is an
+        // over-approximation and has to admit as much.
+        expect(reverse.approximate).toBe(true)
+        expect(reverse.dependents?.every((d) => d.scope === 'field')).toBe(true)
+
+        // Ordinary cells stay exact and unflagged.
+        await call('set_cells', {
+            sheetIdx: 0,
+            cells: [
+                {row: 20, col: 0, content: '5'},
+                {row: 21, col: 0, content: '=A21*2'},
+            ],
+        })
+        const plain = await call<Traced>('trace', {
+            target: {row: 21, col: 0},
+        })
+        expect(plain.precedents?.map((x) => x.ref)).toEqual(['A21'])
+        expect(plain.approximate).toBeUndefined()
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {

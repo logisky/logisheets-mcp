@@ -111,7 +111,7 @@ save_workbook                   hand the human a real .xlsx
 
 ## Tools
 
-The default surface is deliberately small — 16 tools. Tool-selection accuracy
+The default surface is deliberately small — 17 tools. Tool-selection accuracy
 falls as the list grows, and every description costs context on every turn.
 
 | Tool | What it does |
@@ -129,6 +129,7 @@ falls as the list grows, and every description costs context on every turn.
 | `set_field_rule` | Give a field a formula, a validation rule, or an editability rule. |
 | `list_violations` | Which cells break their field's validation rule, and why. |
 | `preview_changes` | What edits *would* do, without doing them. One hypothetical, or a whole grid of scenarios in a single call. |
+| `trace` | What a cell reads, and what reads it — from the engine's dependency graph. |
 | `create_sheet` | Add a sheet. |
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
