@@ -279,6 +279,33 @@ One MCP session holds one active workbook, alive across tool calls — that
 persistence is what makes it memory rather than a calculator. `open_workbook`
 replaces it. Multiple named workbooks per session may come later.
 
+## No network
+
+The server opens no sockets and listens on no ports. "stdio transport" is
+literal: your MCP host spawns this as a child process and they exchange
+newline-delimited JSON-RPC over its stdin and stdout — the same pipes any
+command-line program gets. The engine is WASM running in that same process,
+so a formula is a function call, not a request.
+
+Checked rather than asserted. After a full session — create a block, attach a
+field rule, evaluate a formula, save an `.xlsx` — the process holds:
+
+```
+fd types: {CHR: 2, DIR: 4, KQUEUE: 3, PIPE: 6, REG: 13}
+network files (lsof -a -i):     0
+unix sockets  (lsof -a -U):     0
+listening ports:                0
+```
+
+Six pipes, no sockets. Nothing is uploaded, no telemetry is collected, and an
+air-gapped machine is a supported way to run this. The only things it touches
+outside its own memory are the files you name — see the filesystem note under
+[Getting the file back](#getting-the-file-back).
+
+That is the `logisheets-mcp` binary, which is what an MCP host runs. Using it
+[as a library](#use-as-a-library) you can attach any transport you like,
+including an HTTP one — but then the socket is yours, opened deliberately.
+
 ## License
 
 MIT. Part of the [LogiSheets](https://github.com/logisky/LogiSheets) project.
