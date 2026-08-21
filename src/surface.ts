@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 18 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 19 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -50,6 +50,11 @@ const CORE_IDS: readonly string[] = [
     'build__eval_formula',
     // Structured memory
     'build__create_block',
+    // The counterpart for a workbook someone hands you: `create_block` refuses
+    // to write over existing data, and this takes data that is already there and
+    // makes it addressable in place. Without it an agent given a legacy file has
+    // only the destructive half of the pair.
+    'build__convert_to_block',
     'build__add_block_rows',
     'build__delete_block_rows',
     'edit__set_block_cells',

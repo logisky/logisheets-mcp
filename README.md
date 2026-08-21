@@ -111,7 +111,7 @@ save_workbook                   hand the human a real .xlsx
 
 ## Tools
 
-The default surface is deliberately small — 18 tools. Tool-selection accuracy
+The default surface is deliberately small — 19 tools. Tool-selection accuracy
 falls as the list grows, and every description costs context on every turn.
 
 | Tool | What it does |
@@ -123,6 +123,7 @@ falls as the list grows, and every description costs context on every turn.
 | `describe_block` | A block's schema, keys, and (optionally) its current values. |
 | `eval_formula` | Evaluate an Excel formula and return the value. Nothing is stored. |
 | `create_block` | Create a named, structured table. First field is the row key. |
+| `convert_to_block` | Turn a table that is already in ordinary cells into a block, in place. |
 | `add_block_rows` | Append records. |
 | `delete_block_rows` | Remove records. |
 | `set_block_cells` | Write cells by `(block, row_key, field)`. Batched, atomic. |

@@ -85,7 +85,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(18)
+        expect(names).toHaveLength(19)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -1004,6 +1004,94 @@ describe('logisheets-mcp agent loop', () => {
 
         await host.close()
         full.session.close()
+    })
+
+    it('adopts a table that is already in ordinary cells', async () => {
+        // The scenario the product is sold on, from the other end: the workbook
+        // arrives with data and no blocks. `create_block` is the wrong tool —
+        // it refuses to write over data, correctly — so without a conversion
+        // route an agent handed a legacy file can only address it by coordinate.
+        // Converting keeps every value and is a one-time cost: the block and its
+        // schema survive save and reload.
+        await call('set_cells', {
+            sheetIdx: 0,
+            cells: [
+                {row: 0, col: 0, content: '2024 ledger'},
+                {row: 2, col: 0, content: 'order'},
+                {row: 2, col: 1, content: 'qty'},
+                {row: 2, col: 2, content: 'price'},
+                {row: 3, col: 0, content: 'SO-1'},
+                {row: 3, col: 1, content: 10},
+                {row: 3, col: 2, content: 5},
+                {row: 4, col: 0, content: 'SO-2'},
+                {row: 4, col: 1, content: 20},
+                {row: 4, col: 2, content: 7},
+            ],
+        })
+        type Grid = {cells: Array<{ref: string; value: unknown}>}
+        const before = await call<Grid>('get_cells', {
+            sheetIdx: 0,
+            startRow: 0,
+            startCol: 0,
+            endRow: 5,
+            endCol: 2,
+        })
+
+        const sheets = await call<{sheets: string[]}>('list_blocks').then(
+            async () => (await call<Array<{sheet_name: string}>>('list_blocks'))[0]
+        )
+        const out = await call<{fields: string[]}>('convert_to_block', {
+            sheet: sheets!.sheet_name,
+            name: 'sales',
+            position: {row: 3, col: 0},
+            row_count: 2,
+            col_count: 3,
+            header_row: 2,
+        })
+        // Field names come from the header, which is what makes it readable.
+        expect(out.fields).toEqual(['order', 'qty', 'price'])
+
+        // Nothing moved and nothing was rewritten.
+        const after = await call<Grid>('get_cells', {
+            sheetIdx: 0,
+            startRow: 0,
+            startCol: 0,
+            endRow: 5,
+            endCol: 2,
+        })
+        expect(after.cells).toEqual(before.cells)
+
+        // And it is addressable by name now.
+        const total = await call<{value: unknown}>('eval_formula', {
+            expr: '=SUM(BLOCKREFS("sales","*","qty"))',
+        })
+        expect(total.value).toBe(30)
+        const one = await call<{value: unknown}>('eval_formula', {
+            expr: '=BLOCKREF("sales","SO-2","price")',
+        })
+        expect(one.value).toBe(7)
+
+        // Refusals: a region that already belongs to a block, and no way to name
+        // the fields.
+        await expect(
+            call('convert_to_block', {
+                sheet: sheets!.sheet_name,
+                name: 'again',
+                position: {row: 3, col: 0},
+                row_count: 2,
+                col_count: 3,
+                header_row: 2,
+            })
+        ).rejects.toThrow(/overlaps the existing block/)
+        await expect(
+            call('convert_to_block', {
+                sheet: sheets!.sheet_name,
+                name: 'nameless',
+                position: {row: 20, col: 0},
+                row_count: 1,
+                col_count: 2,
+            })
+        ).rejects.toThrow(/header_row|fields/)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
