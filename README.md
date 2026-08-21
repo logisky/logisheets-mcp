@@ -128,12 +128,36 @@ falls as the list grows, and every description costs context on every turn.
 | `set_block_cells` | Write cells by `(block, row_key, field)`. Batched, atomic. |
 | `set_field_rule` | Give a field a formula, a validation rule, or an editability rule. |
 | `list_violations` | Which cells break their field's validation rule, and why. |
-| `preview_changes` | What a set of edits *would* do, cascade included, without doing it. |
+| `preview_changes` | What edits *would* do, without doing them. One hypothetical, or a whole grid of scenarios in a single call. |
 | `create_sheet` | Add a sheet. |
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
 Formulas are Excel-compatible, plus `BLOCKREF(block, key, field)` for reading a
 block cell semantically.
+
+### Analysing a model, not just building one
+
+`preview_changes` takes a list of `scenarios` and an optional `watch`, which is
+what turns exploration from dozens of round trips into one:
+
+```jsonc
+{
+  "scenarios": [
+    {"label": "wacc 9%",  "changes": [{"block":"assum","row_key":"wacc","field":"v","value":0.09}]},
+    {"label": "wacc 12%", "changes": [{"block":"assum","row_key":"wacc","field":"v","value":0.12}]}
+  ],
+  "watch": [{"block":"valuation","row_key":"per_share","field":"v"}]
+}
+```
+
+Each scenario runs on its own temp branch and is discarded, so the live model is
+never touched — no mutate-and-revert, and nothing left behind if a scan fails
+half way. A 4×4 sensitivity grid is one call returning sixteen numbers.
+
+Reading a model is semantic too: `describe_block` returns each field's rule, so
+an agent learns the model's logic without visiting a cell, and formulas come back
+naming what they read (`B24 / BLOCKREF("assum","shares","v")`) rather than as
+coordinate chains you have to chase.
 
 ### The full surface
 

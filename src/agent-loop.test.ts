@@ -607,6 +607,96 @@ describe('logisheets-mcp agent loop', () => {
         expect(await readTotal()).toBe(1000)
     })
 
+    it('runs a grid of scenarios in one call, watching only the answer', async () => {
+        // A sensitivity table is the commonest thing anyone does to a model, and
+        // doing it by mutating-and-reverting is both slow and unsafe: a failure
+        // mid-scan leaves the model on the last probe. Scenarios run each
+        // hypothetical on its own temp branch, and `watch` keeps the result to
+        // the numbers asked for — a 4x4 grid over a model that cascades into
+        // dozens of cells would otherwise be hundreds of diff rows to answer
+        // sixteen questions.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'assum',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [
+                {key: 'a', values: {v: 2}},
+                {key: 'b', values: {v: 3}},
+            ],
+        })
+        await call('create_block', {
+            sheet: 'S',
+            name: 'out',
+            position: {row: 5, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [{key: 'product'}],
+        })
+        await call('set_block_cells', {
+            changes: [
+                {
+                    block: 'out',
+                    row_key: 'product',
+                    field: 'v',
+                    value: '=BLOCKREF("assum","a","v")*BLOCKREF("assum","b","v")',
+                },
+            ],
+        })
+
+        type Described = {rows?: Array<{key: string; values: Record<string, unknown>}>}
+        const product = async (): Promise<unknown> => {
+            const d = await call<Described>('describe_block', {
+                name: 'out',
+                include_rows: true,
+            })
+            return d.rows?.[0]?.values.v
+        }
+        expect(await product()).toBe(6)
+
+        const grid = [4, 5].flatMap((a) =>
+            [10, 20].map((b) => ({
+                label: `a=${a},b=${b}`,
+                changes: [
+                    {block: 'assum', row_key: 'a', field: 'v', value: a},
+                    {block: 'assum', row_key: 'b', field: 'v', value: b},
+                ],
+            }))
+        )
+
+        const res = await call<{
+            scenarios: Array<{
+                label?: string
+                watched?: Array<{value: unknown}>
+                diff?: unknown[]
+            }>
+        }>('preview_changes', {
+            scenarios: grid,
+            watch: [{block: 'out', row_key: 'product', field: 'v'}],
+        })
+
+        // One result per scenario, in order, each carrying just the watched cell.
+        expect(res.scenarios).toHaveLength(4)
+        const byLabel = new Map(
+            res.scenarios.map((x) => [x.label, x.watched?.[0]?.value])
+        )
+        expect(byLabel.get('a=4,b=10')).toBe(40)
+        expect(byLabel.get('a=4,b=20')).toBe(80)
+        expect(byLabel.get('a=5,b=10')).toBe(50)
+        expect(byLabel.get('a=5,b=20')).toBe(100)
+        // `watch` replaces the diff rather than adding to it.
+        expect(res.scenarios[0]?.diff).toBeUndefined()
+
+        // Scenarios are independent, not cumulative, and none of them stuck.
+        expect(await product()).toBe(6)
+
+        // The single-hypothetical shape still returns a diff, as it always did.
+        const one = await call<{diff: Array<{after: unknown}>}>('preview_changes', {
+            changes: [{block: 'assum', row_key: 'a', field: 'v', value: 7}],
+        })
+        expect(one.diff.some((d) => d.after === 21)).toBe(true)
+        expect(await product()).toBe(6)
+    })
+
     it('rejects a range straddling a block boundary without dying', async () => {
         // A `Range` is wholly normal or wholly one block's, so B1:B10 with B1
         // inside a block has no representation. The engine used to panic here,
