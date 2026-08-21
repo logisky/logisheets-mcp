@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 15 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 16 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -63,6 +63,12 @@ const CORE_IDS: readonly string[] = [
     // to see what breaks it — without it, validation is write-only and the
     // agent has no way to check its own work.
     'inspect__list_violations',
+    // Answering "what would happen if…" without changing anything. Read-only:
+    // it runs the edits on the engine's temp branch, reports the whole cascade
+    // and discards them. Without it the only way to explore is to mutate and
+    // put back, which walks the model somewhere else if anything goes wrong
+    // mid-scan — and a sensitivity scan is dozens of probes.
+    'edit__preview_changes',
 ]
 
 /**

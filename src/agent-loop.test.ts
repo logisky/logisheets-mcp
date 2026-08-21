@@ -82,7 +82,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(15)
+        expect(names).toHaveLength(16)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -547,6 +547,64 @@ describe('logisheets-mcp agent loop', () => {
         expect(resolved.some((f) => f.includes('BLOCKREF'))).toBe(false)
         expect(resolved).toContain('B2')
         expect(resolved.some((f) => f.includes('B1:B2'))).toBe(true)
+    })
+
+    it('previews a change without committing it', async () => {
+        // `preview_changes` is the what-if primitive: it runs the edits on the
+        // engine's temp branch, reports every cell that would move, and discards
+        // the branch. The discard was a silent no-op — the RPC was named
+        // `cleanTempStatus` while the client interface said
+        // `cleanupTempStatus`, so a client that forwards method names verbatim
+        // called nothing at all and every "dry run" committed itself. A
+        // sensitivity scan would have walked the model to the last probe value.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'assum',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [{key: 'rate', values: {v: 10}}],
+        })
+        await call('create_block', {
+            sheet: 'S',
+            name: 'out',
+            position: {row: 5, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [{key: 'total'}],
+        })
+        await call('set_block_cells', {
+            changes: [
+                {
+                    block: 'out',
+                    row_key: 'total',
+                    field: 'v',
+                    value: '=BLOCKREF("assum","rate","v")*100',
+                },
+            ],
+        })
+
+        type Described = {rows?: Array<{key: string; values: Record<string, unknown>}>}
+        const readTotal = async (): Promise<unknown> => {
+            const d = await call<Described>('describe_block', {
+                name: 'out',
+                include_rows: true,
+            })
+            return d.rows?.[0]?.values.v
+        }
+        expect(await readTotal()).toBe(1000)
+
+        const preview = await call<{
+            diff: Array<{block: string | null; field: string | null; before: unknown; after: unknown}>
+        }>('preview_changes', {
+            changes: [{block: 'assum', row_key: 'rate', field: 'v', value: 25}],
+        })
+
+        // It reports the cascade, not just the cell written.
+        const moved = preview.diff.find((d) => d.block === 'out' && d.field === 'v')
+        expect(moved?.before).toBe(1000)
+        expect(moved?.after).toBe(2500)
+
+        // And the live workbook is untouched.
+        expect(await readTotal()).toBe(1000)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
