@@ -82,10 +82,135 @@ describe('logisheets-mcp agent loop', () => {
         await rm(dir, {recursive: true, force: true})
     })
 
+    /**
+     * Reordering rows is presentation-only, and that is exactly the claim
+     * worth pinning: after any move, every computed value must be untouched,
+     * because formulas address rows by key rather than by position.
+     *
+     * The arithmetic is the risk. `MoveBlockLine`'s `to` is the index the row
+     * lands on AFTER it has been lifted out, so anchors below the moved row
+     * have already shifted up by one. Off by one here misplaces the row
+     * silently, so every (row, destination) pair is checked against an
+     * independent model of the resulting order.
+     */
+    it('moves a block row to any keyed destination without disturbing values', async () => {
+        const KEYS = ['a', 'b', 'c', 'd', 'e']
+        const AMT: Record<string, number> = {a: 10, b: 20, c: 30, d: 40, e: 100}
+
+        const build = async () => {
+            await call('open_workbook')
+            await call('create_block', {
+                sheet: 'S',
+                name: 't',
+                position: {row: 0, col: 0},
+                fields: [
+                    {name: 'k'},
+                    {name: 'amt', field_type: 'number'},
+                    {name: 'share', field_type: 'number'},
+                ],
+                initial_rows: KEYS.map((k) => ({key: k, values: {amt: AMT[k]}})),
+            })
+            // Every row divides by the row keyed "e" — a same-block keyed ref,
+            // which is what must survive the reorder.
+            await call('set_field_rule', {
+                block: 't',
+                field: 'share',
+                value_formula: '=#FIELD("amt")/#FIELD("amt","e")',
+            })
+        }
+        const readBack = async () => {
+            const d = await call<{
+                rows: Array<{key: string; values: Record<string, unknown>}>
+            }>('describe_block', {name: 't', include_rows: true})
+            return {
+                order: d.rows.map((r) => r.key),
+                share: Object.fromEntries(
+                    d.rows.map((r) => [r.key, r.values.share as number])
+                ),
+            }
+        }
+        /** Independent model of where the row should end up. */
+        const expected = (
+            key: string,
+            anchor: {after?: string; before?: string}
+        ): string[] => {
+            const o = KEYS.filter((k) => k !== key)
+            if (anchor.after !== undefined)
+                o.splice(o.indexOf(anchor.after) + 1, 0, key)
+            else if (anchor.before !== undefined)
+                o.splice(o.indexOf(anchor.before), 0, key)
+            else o.push(key)
+            return o
+        }
+
+        for (const key of KEYS) {
+            const destinations: Array<[Record<string, string>, string[]]> = [
+                [{}, expected(key, {})],
+            ]
+            for (const other of KEYS.filter((k) => k !== key)) {
+                destinations.push([
+                    {after_key: other},
+                    expected(key, {after: other}),
+                ])
+                destinations.push([
+                    {before_key: other},
+                    expected(key, {before: other}),
+                ])
+            }
+            for (const [args, want] of destinations) {
+                await build()
+                await call('move_block_row', {block: 't', key, ...args})
+                const {order, share} = await readBack()
+                expect(order, `move ${key} ${JSON.stringify(args)}`).toEqual(want)
+                for (const k of KEYS) {
+                    expect(share[k], `share of ${k} after moving ${key}`).toBeCloseTo(
+                        AMT[k] / AMT.e,
+                        9
+                    )
+                }
+            }
+        }
+    })
+
+    it('refuses a move it cannot place, and no-ops one already in place', async () => {
+        await call('open_workbook')
+        await call('create_block', {
+            sheet: 'S',
+            name: 't',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: ['a', 'b', 'c'].map((k, i) => ({
+                key: k,
+                values: {v: i},
+            })),
+        })
+        await expect(
+            call('move_block_row', {block: 't', key: 'a', after_key: 'a'})
+        ).rejects.toThrow(/relative to itself/)
+        await expect(
+            call('move_block_row', {
+                block: 't',
+                key: 'a',
+                after_key: 'b',
+                before_key: 'c',
+            })
+        ).rejects.toThrow(/not both/)
+        await expect(
+            call('move_block_row', {block: 't', key: 'nope', after_key: 'b'})
+        ).rejects.toThrow(/not a row key/)
+        // Already there: accepted, order untouched.
+        const r = await call<{order: string[]}>('move_block_row', {
+            block: 't',
+            key: 'a',
+            before_key: 'b',
+        })
+        expect(r.order).toEqual(['a', 'b', 'c'])
+    })
+
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(19)
+        expect(names).toHaveLength(20)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])

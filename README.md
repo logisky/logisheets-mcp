@@ -111,7 +111,7 @@ save_workbook                   hand the human a real .xlsx
 
 ## Tools
 
-The default surface is deliberately small — 19 tools. Tool-selection accuracy
+The default surface is deliberately small — 20 tools. Tool-selection accuracy
 falls as the list grows, and every description costs context on every turn.
 
 | Tool | What it does |
@@ -124,8 +124,9 @@ falls as the list grows, and every description costs context on every turn.
 | `eval_formula` | Evaluate an Excel formula and return the value. Nothing is stored. |
 | `create_block` | Create a named, structured table. First field is the row key. |
 | `convert_to_block` | Turn a table that is already in ordinary cells into a block, in place. |
-| `add_block_rows` | Append records. |
+| `add_block_rows` | Add records — at the end, or `after_key` / `before_key` to place them. |
 | `delete_block_rows` | Remove records. |
+| `move_block_row` | Reorder rows, by key. Presentation only: no computed value changes. |
 | `set_block_cells` | Write cells by `(block, row_key, field)`. Batched, atomic. |
 | `set_field_rule` | Give a field a formula, a validation rule, or an editability rule. |
 | `list_violations` | Which cells break their field's validation rule, and why. |
@@ -136,7 +137,10 @@ falls as the list grows, and every description costs context on every turn.
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
 Formulas are Excel-compatible, plus `BLOCKREF(block, key, field)` for reading a
-block cell semantically.
+block cell semantically. Inside a field rule, `#FIELD("name")` is the same row's
+sibling and `#FIELD("name", "key")` is another row of the same block — the one
+carrying that key, never a positional offset, so reordering rows cannot change
+what a formula means.
 
 ### Analysing a model, not just building one
 

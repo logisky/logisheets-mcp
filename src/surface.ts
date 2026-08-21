@@ -57,6 +57,11 @@ const CORE_IDS: readonly string[] = [
     'build__convert_to_block',
     'build__add_block_rows',
     'build__delete_block_rows',
+    // Row order is presentation, not model — but the presentation is part of
+    // the deliverable. A person can drag rows around in the app; without this
+    // an agent handed the same file cannot, and cannot put a table into the
+    // order someone asked for.
+    'build__move_block_row',
     'edit__set_block_cells',
     'build__set_field_rule',
     // Sheets
