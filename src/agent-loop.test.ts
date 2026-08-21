@@ -477,13 +477,17 @@ describe('logisheets-mcp agent loop', () => {
         // exactly why this went wrong — `list_blocks` derived its suggested
         // position from blocks alone, so it said row 0, and `create_block`
         // silently overwrote the first row the agent was told to build on.
+        // A real Excel-produced workbook, vendored from the LogiSheets test
+        // corpus. It lives in this repo on purpose: reaching into a sibling
+        // checkout made the suite pass only where the engine source happened
+        // to be, so the publish workflow — which installs the engine from npm
+        // — could not run it.
         const src = resolve(
             dirname(fileURLToPath(import.meta.url)),
             '..',
-            '..',
-            'LogiSheets',
             'tests',
-            '6.xlsx'
+            'fixtures',
+            'user-workbook.xlsx'
         )
         const work = join(dir, 'brought-by-user.xlsx')
         await copyFile(src, work)
