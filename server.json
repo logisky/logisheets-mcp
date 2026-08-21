@@ -21,7 +21,7 @@
             "environmentVariables": [
                 {
                     "name": "LOGISHEETS_MCP_TOOLS",
-                    "description": "Tool surface: 'core' (default, 17 tools) or 'full', which adds formatting, comments, links, undo/redo and raw structure operations.",
+                    "description": "Tool surface: 'core' (default, 18 tools) or 'full', which adds formatting, comments, links, undo/redo and raw structure operations.",
                     "isRequired": false,
                     "isSecret": false
                 }

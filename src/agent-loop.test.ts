@@ -82,7 +82,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(17)
+        expect(names).toHaveLength(18)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -778,6 +778,71 @@ describe('logisheets-mcp agent loop', () => {
         })
         expect(plain.precedents?.map((x) => x.ref)).toEqual(['A21'])
         expect(plain.approximate).toBeUndefined()
+    })
+
+    it('solves backwards for an input, without touching the model', async () => {
+        // "What rate gives me this answer" is a question, not an edit. As a
+        // conversation it is one round trip per bisection step — 60-odd calls for
+        // one answer — so the search runs inside the engine on temp branches and
+        // costs a single call.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'assum',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [{key: 'rate', values: {v: 2}}],
+        })
+        await call('set_cells', {
+            sheetIdx: 0,
+            cells: [
+                // out = rate^2 + 1, monotonic for rate > 0, so rate = 3 gives 10.
+                {
+                    row: 10,
+                    col: 0,
+                    content: '=BLOCKREF("assum","rate","v")*BLOCKREF("assum","rate","v")+1',
+                },
+            ],
+        })
+
+        type Sought = {
+            value: number | null
+            achieved: number | null
+            converged: boolean
+            iterations: number
+            note?: string
+        }
+
+        const solved = await call<Sought>('goal_seek', {
+            set: {block: 'assum', row_key: 'rate', field: 'v'},
+            target: {row: 10, col: 0},
+            to: 10,
+            between: [0, 10],
+        })
+        expect(solved.converged).toBe(true)
+        expect(solved.value).toBeCloseTo(3, 6)
+        expect(solved.achieved).toBeCloseTo(10, 6)
+        // The whole search was internal, so this is many probes in one call.
+        expect(solved.iterations).toBeGreaterThan(1)
+
+        // A target the output never reaches must say so rather than return the
+        // closest number it happened to end on.
+        const impossible = await call<Sought>('goal_seek', {
+            set: {block: 'assum', row_key: 'rate', field: 'v'},
+            target: {row: 10, col: 0},
+            to: -5,
+            between: [0, 10],
+        })
+        expect(impossible.converged).toBe(false)
+        expect(impossible.value).toBeNull()
+        expect(impossible.note).toMatch(/does not cross/)
+
+        // Nothing was committed by any of it.
+        type Described = {rows?: Array<{values: Record<string, unknown>}>}
+        const still = await call<Described>('describe_block', {
+            name: 'assum',
+            include_rows: true,
+        })
+        expect(still.rows?.[0]?.values.v).toBe(2)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {

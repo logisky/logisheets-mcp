@@ -111,7 +111,7 @@ save_workbook                   hand the human a real .xlsx
 
 ## Tools
 
-The default surface is deliberately small — 17 tools. Tool-selection accuracy
+The default surface is deliberately small — 18 tools. Tool-selection accuracy
 falls as the list grows, and every description costs context on every turn.
 
 | Tool | What it does |
@@ -130,6 +130,7 @@ falls as the list grows, and every description costs context on every turn.
 | `list_violations` | Which cells break their field's validation rule, and why. |
 | `preview_changes` | What edits *would* do, without doing them. One hypothetical, or a whole grid of scenarios in a single call. |
 | `trace` | What a cell reads, and what reads it — from the engine's dependency graph. |
+| `goal_seek` | What input makes a chosen output equal a target. Searches inside the engine; changes nothing. |
 | `create_sheet` | Add a sheet. |
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
@@ -154,6 +155,17 @@ what turns exploration from dozens of round trips into one:
 Each scenario runs on its own temp branch and is discarded, so the live model is
 never touched — no mutate-and-revert, and nothing left behind if a scan fails
 half way. A 4×4 sensitivity grid is one call returning sixteen numbers.
+
+`goal_seek` runs the same trick backwards — "what discount rate gives a value per
+share of 30" — with the search inside the engine rather than as a conversation,
+so it is one call instead of one per bisection step. It says when a target is
+simply not reachable in the bracket instead of returning the nearest number it
+happened to stop on.
+
+`trace` answers the two audit questions from the engine's dependency graph:
+what a cell reads, and what reads it. The second one is why it exists — formula
+text can be read forwards but not backwards, and "what breaks if I change this"
+is the question you want before touching an assumption.
 
 Reading a model is semantic too: `describe_block` returns each field's rule, so
 an agent learns the model's logic without visiting a cell, and formulas come back

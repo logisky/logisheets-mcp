@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 17 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 18 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -74,6 +74,10 @@ const CORE_IDS: readonly string[] = [
     // in the workbook and parsing it — and that still cannot answer the reverse
     // direction, which is the one you want before changing an assumption.
     'inspect__trace',
+    // Reverse the model: what input lands the answer on a given number. Runs the
+    // whole search on the temp branch inside one call — as a conversation it is
+    // one round trip per bisection step, and it changes nothing either way.
+    'edit__goal_seek',
 ]
 
 /**
