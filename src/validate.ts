@@ -233,10 +233,21 @@ function collect(
             collect(v, sub, path === '' ? key : `${path}.${key}`, out)
         }
 
-        // Unknown keys are reported only as a hint alongside a real problem,
-        // never on their own: a handler may legitimately tolerate extras, and
-        // rejecting a call that would have worked is worse than staying quiet.
-        if (out.length > 0 && declared.length > 0) {
+        // Unknown keys are a hard error, not a hint.
+        //
+        // This started out the other way round — reported only alongside some
+        // other problem, on the theory that a handler might tolerate extras
+        // and that rejecting a call which would have worked is worse than
+        // staying quiet. Testing settled it: passing `after_key` to a tool
+        // that had no such parameter returned success, the rows went
+        // somewhere else entirely, and everything downstream reasoned from a
+        // false premise. A rejected call costs one retry; a silently ignored
+        // parameter costs the agent its model of what the workbook contains.
+        //
+        // Free-form objects are unaffected — this whole branch is only
+        // entered for schemas that actually declare `properties`/`required`,
+        // so a value-bag keyed by arbitrary field names never reaches here.
+        if (declared.length > 0) {
             for (const key of unknown) {
                 if (paired.has(key)) continue
                 const guess = didYouMean(key, declared)

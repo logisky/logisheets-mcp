@@ -142,12 +142,43 @@ describe('validateToolInput', () => {
         ).toContain('must be >= 0')
     })
 
-    it('tolerates an unknown key when nothing else is wrong', () => {
-        // A handler may accept extras, so a stray key alone must not reject a
-        // call that would have succeeded. It only shows up as a hint next to a
-        // real problem (see the near-miss case above).
+    it('rejects an unknown key even when nothing else is wrong', () => {
+        // An invented parameter that a handler quietly drops is the worst
+        // outcome: the call reports success and the agent believes it did
+        // something it did not. One retry is cheaper than a wrong mental
+        // model of the workbook.
         const t = tool({properties: {expr: {type: 'string'}}, required: ['expr']})
-        expect(validateToolInput(t, {expr: '=1+1', extra: true})).toBeUndefined()
+        expect(validateToolInput(t, {expr: '=1+1', extra: true})).toContain(
+            'unknown parameter `extra`'
+        )
+    })
+
+    it('names the nearest declared parameter for an unknown key', () => {
+        const t = tool({
+            properties: {
+                block: {type: 'string'},
+                rows: {type: 'array'},
+                after_key: {type: 'string'},
+            },
+            required: ['block', 'rows'],
+        })
+        // The mistake that motivated the hard error: aiming at a positional
+        // insert with a parameter name that doesn't exist.
+        expect(
+            validateToolInput(t, {block: 'T', rows: [], afterKey: 'r1'})
+        ).toContain('did you mean `after_key`?')
+    })
+
+    it('leaves free-form value bags alone', () => {
+        // `values` declares no properties, so arbitrary field names in it are
+        // data, not typos — the unknown-key check must not reach inside.
+        const t = tool({
+            properties: {values: {type: 'object'}},
+            required: ['values'],
+        })
+        expect(
+            validateToolInput(t, {values: {qty: 1, price: 2, '数量': 3}})
+        ).toBeUndefined()
     })
 
     it('constrains nothing when the schema declares nothing', () => {
