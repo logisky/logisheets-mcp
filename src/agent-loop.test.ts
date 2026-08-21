@@ -94,8 +94,10 @@ describe('logisheets-mcp agent loop', () => {
      * independent model of the resulting order.
      */
     it('moves a block row to any keyed destination without disturbing values', async () => {
-        const KEYS = ['a', 'b', 'c', 'd', 'e']
-        const AMT: Record<string, number> = {a: 10, b: 20, c: 30, d: 40, e: 100}
+        // Literal keys, so indexing stays a `number` under
+        // noUncheckedIndexedAccess rather than `number | undefined`.
+        const AMT = {a: 10, b: 20, c: 30, d: 40, e: 100} as const
+        const KEYS = Object.keys(AMT) as Array<keyof typeof AMT>
 
         const build = async () => {
             await call('open_workbook')
@@ -131,10 +133,10 @@ describe('logisheets-mcp agent loop', () => {
         }
         /** Independent model of where the row should end up. */
         const expected = (
-            key: string,
+            key: (typeof KEYS)[number],
             anchor: {after?: string; before?: string}
         ): string[] => {
-            const o = KEYS.filter((k) => k !== key)
+            const o: string[] = KEYS.filter((k) => k !== key)
             if (anchor.after !== undefined)
                 o.splice(o.indexOf(anchor.after) + 1, 0, key)
             else if (anchor.before !== undefined)

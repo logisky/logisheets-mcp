@@ -5,83 +5,19 @@ on:
     branches: [main]
   pull_request:
 
-# This does more than `npm ci && npm test` on purpose. The test suite exercises
-# engine behaviour that is fixed but not yet released — a field rule surviving a
-# save/reload, formulas on block cells coming back — so installing
-# `logisheets-runtime` from the registry would fail on those. So CI builds the
-# engine from a sibling LogiSheets checkout, exactly as `npm run link:local`
-# documents for contributors.
-#
-# Once the engine release carrying those fixes is out, this collapses to a
-# checkout, `npm ci` and `npm test`.
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out logisheets-mcp
-        uses: actions/checkout@v4
-        with:
-          path: logisheets-mcp
-
-      # link-local resolves this by default as a sibling of the server repo.
-      - name: Check out LogiSheets
-        uses: actions/checkout@v4
-        with:
-          repository: logisky/LogiSheets
-          path: LogiSheets
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            LogiSheets/target
-          key: cargo-${{ hashFiles('LogiSheets/Cargo.lock') }}
-          restore-keys: cargo-
+      - run: npm ci
 
-      - name: Install wasm-pack
-        run: cargo install --locked wasm-pack
+      - run: npm run typecheck
 
-      # The engine's TS bindings are generated from the Rust types and are
-      # gitignored, so a clean checkout has none.
-      - name: Generate bindings
-        working-directory: LogiSheets
-        run: cargo run --package buildtools --bin generate --all-features
-
-      - name: Install LogiSheets deps
-        working-directory: LogiSheets
-        run: corepack enable && yarn install --immutable
-
-      # Only the three packages the server actually links against, in
-      # dependency order. `logisheets` (node bindings) builds the WASM.
-      - name: Build the engine packages
-        working-directory: LogiSheets
-        run: |
-          yarn workspace logisheets-web build
-          yarn workspace logisheets-core build
-          yarn workspace logisheets run link
-          yarn workspace logisheets build
-          yarn workspace logisheets-runtime build
-          yarn workspace logisheets-logician build
-
-      - name: Install
-        working-directory: logisheets-mcp
-        run: npm ci
-
-      - name: Link the local engine
-        working-directory: logisheets-mcp
-        run: npm run link:local
-
-      - name: Typecheck
-        working-directory: logisheets-mcp
-        run: npm run typecheck
-
-      - name: Test
-        working-directory: logisheets-mcp
-        run: npm test
+      - run: npm test

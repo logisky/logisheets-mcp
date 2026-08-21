@@ -19,8 +19,8 @@ import {fileURLToPath} from 'node:url'
 const PKG = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json')
 /** Local deps that must become registry ranges, with their fallback version. */
 const LOCAL_DEPS = {
-    'logisheets-logician': '1.11.0',
-    'logisheets-runtime': '1.11.0',
+    'logisheets-logician': '1.12.0',
+    'logisheets-runtime': '1.12.0',
 }
 
 const version = process.argv[2]

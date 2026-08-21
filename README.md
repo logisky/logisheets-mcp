@@ -231,26 +231,26 @@ so you can host it over any transport or embed it in an agent framework.
 The server is a thin shell over three LogiSheets packages:
 [`logisheets-runtime`](https://www.npmjs.com/package/logisheets-runtime) (the
 headless engine), `logisheets-logician` (the agent tool definitions), and the
-Rust/WASM core. Working on it usually means working on those too, so
-dependencies point at a sibling checkout:
+Rust/WASM core. Working on the server alone needs nothing special:
 
 ```bash
-git clone https://github.com/logisky/LogiSheets.git
 git clone https://github.com/logisky/logisheets-mcp.git
 cd logisheets-mcp
 npm install
-npm run link:local     # re-run after any npm install
 npm test
 ```
 
-`npm run link:local` symlinks the three packages into `node_modules`, so local
-engine changes take effect without reinstalling. `scripts/release-deps.mjs`
-flips them back to registry ranges before publishing.
+Working on the engine at the same time is the other mode. Check out
+[LogiSheets](https://github.com/logisky/LogiSheets) as a sibling directory,
+build its packages, then:
 
-Right now `link:local` is **required** for the full test suite, not just
-convenient: the field-rule round-trip test needs an engine fix that has not
-been released yet, so it fails against the published `logisheets` on npm. That
-goes away with the next LogiSheets release.
+```bash
+npm run link:local     # re-run after any npm install
+```
+
+That symlinks the three packages into `node_modules` so local engine changes
+take effect without reinstalling. `scripts/release-deps.mjs` puts the registry
+ranges back before publishing.
 
 ## Getting the file back
 
