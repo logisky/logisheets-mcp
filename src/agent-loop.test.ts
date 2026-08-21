@@ -12,6 +12,9 @@ import {tmpdir} from 'node:os'
 import {inflateRawSync} from 'node:zlib'
 import {fileURLToPath} from 'node:url'
 import {join, resolve, dirname} from 'node:path'
+import {Client} from '@modelcontextprotocol/sdk/client/index.js'
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js'
+import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js'
 import {afterEach, beforeEach, describe, expect, it} from 'vitest'
 import type {Tool, ToolContext} from 'logisheets-logician'
 import {createServer} from './server.js'
@@ -899,6 +902,108 @@ describe('logisheets-mcp agent loop', () => {
             expr: `=BLOCKREF("${block!.name}","b","${block!.derived_fields[0]}")`,
         })
         expect(evaluated.value).toBe(21)
+    })
+
+    it('carries rules along when a block or field is renamed', async () => {
+        // A rename reaches cell formulas on its own, because BLOCKREF resolves
+        // to stable ids at parse time. Field RULES are stored as text and
+        // re-parsed for every row, so a rename they do not know about leaves
+        // them naming something gone: the rows that already exist keep their
+        // values and look right, and the next row added comes back #NAME?.
+        const full = createServer({mode: 'full', log: () => {}})
+        const host = new Client({name: 'rename-host', version: '0.0.0'})
+        const [a, b] = InMemoryTransport.createLinkedPair()
+        await Promise.all([full.server.connect(b), host.connect(a)])
+        const run = async <T>(name: string, args: unknown = {}): Promise<T> => {
+            const res = (await host.callTool({
+                name,
+                arguments: args as Record<string, unknown>,
+            })) as CallToolResult
+            const text = res.content
+                .filter((c): c is {type: 'text'; text: string} => c.type === 'text')
+                .map((c) => c.text)
+                .join('\n')
+            if (res.isError) throw new Error(text)
+            for (const line of text.split('\n').reverse()) {
+                const i = line.search(/[[{]/)
+                if (i >= 0) {
+                    try {
+                        return JSON.parse(line.slice(i)) as T
+                    } catch {
+                        /* not the payload */
+                    }
+                }
+            }
+            return undefined as T
+        }
+
+        await run('open_workbook')
+        await run('create_block', {
+            sheet: 'S',
+            name: 'src',
+            position: {row: 0, col: 0},
+            fields: [{name: 'k'}, {name: 'v', field_type: 'number'}],
+            initial_rows: [{key: 'rate', values: {v: 3}}],
+        })
+        await run('create_block', {
+            sheet: 'S',
+            name: 'dst',
+            position: {row: 5, col: 0},
+            fields: [
+                {name: 'k'},
+                {name: 'n', field_type: 'number'},
+                {name: 'scaled', field_type: 'number'},
+            ],
+            initial_rows: [{key: 'x', values: {n: 10}}],
+        })
+        // dst's rule names src by its ref name, in stored template text.
+        await run('set_field_rule', {
+            block: 'dst',
+            field: 'scaled',
+            value_formula: '=#FIELD("n")*BLOCKREF("src","rate","v")',
+        })
+
+        type Described = {
+            fields: Array<{name: string; value_formula?: string | null}>
+            rows?: Array<{key: string; values: Record<string, unknown>}>
+        }
+        const scaled = async (key: string): Promise<unknown> => {
+            const d = await run<Described>('describe_block', {
+                name: 'dst',
+                include_rows: true,
+            })
+            return d.rows?.find((r) => r.key === key)?.values.scaled
+        }
+        expect(await scaled('x')).toBe(30)
+
+        // Renaming the referenced block rewrites the other block's rule.
+        const out = await run<{rules_rewritten: number}>('rename_block', {
+            from: 'src',
+            to: 'source',
+        })
+        expect(out.rules_rewritten).toBe(1)
+
+        // The proof is a row added AFTER the rename: it has to re-parse the
+        // template, so a dangling name shows up here and nowhere earlier.
+        await run('add_block_rows', {block: 'dst', rows: [{key: 'z', values: {n: 50}}]})
+        expect(await scaled('z')).toBe(150)
+
+        // Renaming a field carries its own block's rules with it.
+        await run('rename_field', {block: 'dst', from: 'n', to: 'units'})
+        await run('add_block_rows', {block: 'dst', rows: [{key: 'w', values: {units: 4}}]})
+        expect(await scaled('w')).toBe(12)
+
+        // Refusals: a name already taken, and a field another block's rule reads
+        // by name — rewriting that from text alone is not safe, so it says so.
+        await expect(run('rename_block', {from: 'dst', to: 'source'})).rejects.toThrow(
+            /already exists/
+        )
+        await expect(
+            run('rename_field', {block: 'source', from: 'v', to: 'value'})
+        ).rejects.toThrow(/mention that name/)
+
+        await host.close()
+        full.session.close()
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
