@@ -263,6 +263,11 @@ npm run check-release    # optional; CI runs it too
 git push --follow-tags
 ```
 
+The workflow can also be run by hand from the Actions tab, which takes the
+version from `package.json` instead of a tag. The npm step skips a version that
+is already published, so a run that failed at the registry step can just be
+re-run — the two publishes are not a transaction.
+
 `npm version` also rewrites `server.json`, via the `version` lifecycle script.
 The registry keeps the version in two places — the server's own `version` and
 the version of the npm package it points at — and hand-editing them is the step

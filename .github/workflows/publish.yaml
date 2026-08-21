@@ -3,6 +3,10 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  # Lets a release be re-run, and lets a version that is already on npm be
+  # registered without one. Both matter because the two publishes below are
+  # not a transaction: npm can succeed and the registry step still fail.
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -31,17 +35,37 @@ jobs:
 
       - run: npm test
 
-      # Before anything irreversible. `npm publish` spends a version number
-      # permanently, so a mismatch caught afterwards costs the next one.
-      # Holds package.json, both version fields in server.json, and the
-      # mcpName ↔ server name pair to the tag.
-      - name: Check the release is coherent
-        run: node scripts/check-release.mjs "${GITHUB_REF#refs/tags/}"
+      # A tag names the version; a manual run takes package.json's word for it.
+      - name: Resolve the release
+        id: release
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            version="${version#v}"
+          else
+            version="$(node -p 'require("./package.json").version')"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p 'require("./package.json").name')" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
 
-      # --provenance links the published tarball to this commit and workflow,
-      # verifiable by anyone installing it. Needs the id-token permission above.
+      # Before anything irreversible. Holds package.json, both version fields
+      # in server.json, and the mcpName ↔ server name pair to that version.
+      - name: Check the release is coherent
+        run: node scripts/check-release.mjs "${{ steps.release.outputs.version }}"
+
+      # Skipped when that exact version is already on npm, so the job can be
+      # re-run after a failure further down without dying here on E403.
+      # --provenance links the tarball to this commit and workflow, verifiable
+      # by anyone installing it; it needs the id-token permission above.
       - name: Publish to npm
-        run: npm publish --provenance
+        run: |
+          spec="${{ steps.release.outputs.name }}@${{ steps.release.outputs.version }}"
+          if npm view "$spec" version >/dev/null 2>&1; then
+            echo "$spec is already on npm — skipping publish"
+          else
+            npm publish --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
