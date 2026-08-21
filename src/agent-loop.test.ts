@@ -845,6 +845,62 @@ describe('logisheets-mcp agent loop', () => {
         expect(still.rows?.[0]?.values.v).toBe(2)
     })
 
+    it('reports each block\'s fields, so one call is enough to write a formula', async () => {
+        // Knowing a block exists is useless without knowing what to reference.
+        // list_blocks used to return only name/size/position, so an agent
+        // arriving at an unfamiliar workbook needed one describe_block per block
+        // before it could write a single BLOCKREF. The field names were already
+        // in the data it had fetched — getAllBlocks returns the schema — and
+        // were being discarded.
+        await call('create_block', {
+            sheet: 'S',
+            name: 'items',
+            position: {row: 0, col: 0},
+            fields: [
+                {name: 'sku'},
+                {name: 'qty', field_type: 'number'},
+                {name: 'price', field_type: 'number'},
+                {name: 'total', field_type: 'number'},
+            ],
+            initial_rows: [
+                {key: 'a', values: {qty: 2, price: 5}},
+                {key: 'b', values: {qty: 3, price: 7}},
+            ],
+        })
+        await call('set_field_rule', {
+            block: 'items',
+            field: 'total',
+            value_formula: '=#FIELD("qty")*#FIELD("price")',
+        })
+
+        type Group = {
+            blocks: Array<{
+                name: string
+                fields: string[]
+                key_field: string | null
+                derived_fields: string[]
+                key_count: number
+            }>
+        }
+        const groups = await call<Group[]>('list_blocks')
+        const block = groups.flatMap((g) => g.blocks).find((b) => b.name === 'items')
+        expect(block).toBeDefined()
+
+        // Fields in column order — the third argument to BLOCKREF.
+        expect(block!.fields).toEqual(['sku', 'qty', 'price', 'total'])
+        // The key column, whose values BLOCKREF matches as its second argument.
+        expect(block!.key_field).toBe('sku')
+        // Rule-computed fields, which reject writes — knowing saves a failed call.
+        expect(block!.derived_fields).toEqual(['total'])
+        expect(block!.key_count).toBe(2)
+
+        // Everything needed to write a working formula came from that one call.
+        const evaluated = await call<{value: unknown}>('eval_formula', {
+            expr: `=BLOCKREF("${block!.name}","b","${block!.derived_fields[0]}")`,
+        })
+        expect(evaluated.value).toBe(21)
+    })
+
     it('rejects a range straddling a block boundary without dying', async () => {
         // A `Range` is wholly normal or wholly one block's, so B1:B10 with B1
         // inside a block has no representation. The engine used to panic here,
