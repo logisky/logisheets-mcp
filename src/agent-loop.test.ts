@@ -209,6 +209,127 @@ describe('logisheets-mcp agent loop', () => {
         expect(r.order).toEqual(['a', 'b', 'c'])
     })
 
+    /**
+     * Adopting a table should not require measuring it first. The region is
+     * still pointed at, but which row holds the titles and which column
+     * identifies a row are read out of the data — and reported back, because an
+     * inference the caller cannot see is one they cannot correct.
+     */
+    it('infers the header row and the row key when adopting a table', async () => {
+        const seed = async (rows: unknown[][], withHeader: boolean) => {
+            await call('open_workbook')
+            const cells: Array<{row: number; col: number; content: string}> = []
+            if (withHeader) {
+                ;['tag', 'city', 'amt'].forEach((h, col) =>
+                    cells.push({row: 0, col, content: h})
+                )
+            }
+            rows.forEach((r, i) =>
+                r.forEach((v, col) =>
+                    cells.push({
+                        row: i + (withHeader ? 1 : 0),
+                        col,
+                        content: String(v),
+                    })
+                )
+            )
+            await call('set_cells', {sheetIdx: 0, cells})
+        }
+        type Adopted = {
+            fields: string[]
+            key_field: string
+            header_row: number | null
+        }
+        const adopt = (name: string, extra: Record<string, unknown> = {}) =>
+            call<Adopted>('convert_to_block', {
+                sheet: 'Sheet1',
+                name,
+                position: {row: 1, col: 0},
+                row_count: 3,
+                col_count: 3,
+                ...extra,
+            })
+
+        // Titles above numeric-bearing data: both the header and the key follow.
+        await seed(
+            [
+                ['x', 'Beijing', 1],
+                ['y', 'Shanghai', 2],
+                ['z', 'Guangzhou', 3],
+            ],
+            true
+        )
+        let r = await adopt('t1')
+        expect(r.header_row).toBe(0)
+        expect(r.fields).toEqual(['tag', 'city', 'amt'])
+        expect(r.key_field).toBe('tag')
+
+        // A first column that repeats cannot address every row, so the key moves
+        // on. BLOCKREF would resolve both 'x' rows to the first match.
+        await seed(
+            [
+                ['x', 'Beijing', 1],
+                ['x', 'Shanghai', 2],
+                ['y', 'Guangzhou', 3],
+            ],
+            true
+        )
+        r = await adopt('t2')
+        expect(r.key_field).toBe('city')
+
+        // Stated wins, and a name that is not a field is refused rather than
+        // silently ignored.
+        await seed(
+            [
+                ['x', 'Beijing', 1],
+                ['y', 'Shanghai', 2],
+                ['z', 'Guangzhou', 3],
+            ],
+            true
+        )
+        r = await adopt('t3', {key_field: 'city'})
+        expect(r.key_field).toBe('city')
+        await seed(
+            [
+                ['x', 'Beijing', 1],
+                ['y', 'Shanghai', 2],
+                ['z', 'Guangzhou', 3],
+            ],
+            true
+        )
+        await expect(adopt('t4', {key_field: 'nope'})).rejects.toThrow(
+            /not one of the fields/
+        )
+
+        // Every column repeating: there is no key in the data, so it says so
+        // rather than pretending the first column will do.
+        await seed(
+            [
+                ['x', 'Beijing', 1],
+                ['x', 'Beijing', 1],
+                ['x', 'Beijing', 1],
+            ],
+            true
+        )
+        r = await adopt('t5')
+        expect(r.key_field).toBe('tag')
+
+        // And the case that must NOT be guessed: all-text data under all-text
+        // titles is genuinely ambiguous, so the fields are generated and the
+        // caller is told what to pass.
+        await seed(
+            [
+                ['x', 'Beijing', 'north'],
+                ['y', 'Shanghai', 'east'],
+                ['z', 'Guangzhou', 'south'],
+            ],
+            true
+        )
+        r = await adopt('t6')
+        expect(r.header_row).toBeNull()
+        expect(r.fields).toEqual(['field_1', 'field_2', 'field_3'])
+    })
+
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
@@ -1209,8 +1330,10 @@ describe('logisheets-mcp agent loop', () => {
         })
         expect(one.value).toBe(7)
 
-        // Refusals: a region that already belongs to a block, and no way to name
-        // the fields.
+        // Refusals: a region that already belongs to a block, and a region with
+        // nothing in it — field names no longer have to be supplied, they are
+        // read from the header row or generated, but there must be data to
+        // adopt.
         await expect(
             call('convert_to_block', {
                 sheet: sheets!.sheet_name,
@@ -1229,7 +1352,7 @@ describe('logisheets-mcp agent loop', () => {
                 row_count: 1,
                 col_count: 2,
             })
-        ).rejects.toThrow(/header_row|fields/)
+        ).rejects.toThrow(/nothing in the region/)
     })
 
     it('rejects a range straddling a block boundary without dying', async () => {
