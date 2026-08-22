@@ -798,9 +798,10 @@ describe('logisheets-mcp agent loop', () => {
         )
 
         const res = await call<{
+            watching?: Array<Record<string, unknown>>
             scenarios: Array<{
                 label?: string
-                watched?: Array<{value: unknown}>
+                values?: unknown[]
                 diff?: unknown[]
             }>
         }>('preview_changes', {
@@ -808,10 +809,16 @@ describe('logisheets-mcp agent loop', () => {
             watch: [{block: 'out', row_key: 'product', field: 'v'}],
         })
 
-        // One result per scenario, in order, each carrying just the watched cell.
+        // One result per scenario, in order, each carrying just the watched
+        // values — bare, with the targets named once at the top. Repeating the
+        // target on every scenario cost more bytes on a 16-cell grid than all
+        // sixteen answers put together.
         expect(res.scenarios).toHaveLength(4)
+        expect(res.watching).toEqual([
+            {block: 'out', row_key: 'product', field: 'v'},
+        ])
         const byLabel = new Map(
-            res.scenarios.map((x) => [x.label, x.watched?.[0]?.value])
+            res.scenarios.map((x) => [x.label, x.values?.[0]])
         )
         expect(byLabel.get('a=4,b=10')).toBe(40)
         expect(byLabel.get('a=4,b=20')).toBe(80)

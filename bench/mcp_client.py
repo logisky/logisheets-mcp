@@ -20,7 +20,8 @@ class Server:
         self.name = name
         self.command = command
         self.timeout = timeout
-        self.calls = 0            # tool calls, the context-cost metric
+        self.calls = 0            # tool calls
+        self.bytes = 0            # bytes of tool output — what context actually costs
         self.stderr_path = f"/tmp/bench-{name.replace('/', '_')}.stderr"
         self._id = 0
         self._stderr = open(self.stderr_path, "w")
@@ -86,6 +87,10 @@ class Server:
         res = r.get("result", {})
         text = "\n".join(c.get("text", "") for c in res.get("content", [])
                          if c.get("type") == "text")
+        # Every byte of this lands in the model's context. Counted alongside
+        # the call, because ten terse replies can be cheaper than one verbose
+        # one and the call count alone hides that.
+        self.bytes += len(text.encode("utf-8"))
         if res.get("isError"):
             return None, text
         if res.get("structuredContent") is not None:
