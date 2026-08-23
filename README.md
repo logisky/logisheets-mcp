@@ -123,7 +123,7 @@ falls as the list grows, and every description costs context on every turn.
 | `describe_block` | A block's schema, keys, and (optionally) its current values. |
 | `eval_formula` | Evaluate an Excel formula and return the value. Nothing is stored. |
 | `create_block` | Create a named, structured table. First field is the row key. |
-| `convert_to_block` | Turn a table that is already in ordinary cells into a block, in place. |
+| `convert_to_block` | Adopt a table that is already in ordinary cells, in place. Reads the field names off the header row and works out which column is the row key. |
 | `add_block_rows` | Add records — at the end, or `after_key` / `before_key` to place them. |
 | `delete_block_rows` | Remove records. |
 | `move_block_row` | Reorder rows, by key. Presentation only: no computed value changes. |
