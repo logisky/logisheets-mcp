@@ -32,7 +32,48 @@ references. So the agent doesn't address `C7`. It addresses
 > set the `price` field of the `2025` record in the `revenue` block
 
 Insert a row, move the block, add a column — that address still resolves. This
-is the whole point: **memory that survives the agent's own edits.**
+is the whole point: **memory that survives the agent's own edits.** What that
+buys, measured, is the next section.
+
+### What structure buys a model
+
+An agent's weakest faculty on a spreadsheet is bookkeeping: remembering where
+things are, and noticing when its own edits have invalidated the addresses it
+was relying on. A block removes the need for that bookkeeping rather than asking
+the model to be better at it. Concretely, from [the measurements](#measured-against-the-alternatives):
+
+**Addresses don't go stale.** Delete a projected year, insert two rows at the
+top and a column at the left, then ask for the answer again:
+`describe_block("val")` still returns it — 19.383943, correct for the edited
+model. The two coordinate-based servers return `#VALUE!` and a formula string,
+because `SUM(E11:E15)` and a terminal value reading `C15` no longer point where
+they did.
+
+**The file carries the meaning, so the context window doesn't have to.** Reopened
+in a fresh session, a field's rule reads
+`#FIELD("rev")*BLOCKREF("assum","margin","v")*(1-BLOCKREF("assum","tax","v"))`.
+Nothing has to be looked up to understand it, this session or any later one —
+2.4 kB to read the model back, against 21 kB of grid to parse and a `$B$3` still
+to decode.
+
+**A set can be named without knowing its size or where it sits.**
+`SUM(BLOCKREFS("proj","*","pv"))` is every row of a column, however many there
+are and wherever the block has moved to. There is no range to get wrong, which
+is why the aggregate above survived the edit that broke `SUM(E11:E15)`.
+
+**A rule is written once and covers rows that don't exist yet.** `set_field_rule`
+states how a field is computed for the field, not per cell; `add_block_rows`
+then materialises it on the new row. Four rules covered five projected years in
+the DCF, and a sixth year needs no formula work at all — which matters because
+authoring the same formula N times, with the row number adjusted, is exactly
+where a model makes silent arithmetic mistakes.
+
+**A mistake comes back as a refusal, not as a number.** A duplicate row key, a
+`#FIELD` naming a field that doesn't exist, a field rule written with a
+coordinate instead (a template applies to every row, so a fixed address in one
+cannot mean what it looks like), a parameter the tool doesn't have — each is
+rejected at the call, with the near miss named. A rejected call costs one retry;
+a plausible-looking wrong number costs the task.
 
 ### vs. a Python sandbox
 
