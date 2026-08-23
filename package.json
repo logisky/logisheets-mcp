@@ -32,8 +32,8 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "logisheets-logician": "^1.12.0",
-        "logisheets-runtime": "^1.12.0"
+        "logisheets-logician": "^1.12.1",
+        "logisheets-runtime": "^1.12.1"
     },
     "devDependencies": {
         "@types/node": "^22",
