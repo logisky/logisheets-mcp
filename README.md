@@ -307,11 +307,14 @@ most-installed one, on openpyxl:
 | Solve backwards for an input | **1 call**, 202 B | 18 calls, 1399 B | can't |
 | Reopen it later and explain it | 4 calls, **2.4 kB** | 5 calls, 21 kB | 2 calls, 24 kB |
 | Answer again after the shape changed | **19.383943** | `#VALUE!` | formula text |
-| Keep a handed-over file's features | 6 of 8 | **8 of 8** | **8 of 8** |
+| Keep a handed-over file's features | **8 of 8** | **8 of 8** | **8 of 8** |
 
-The last row is ours to fix: an open-write-save keeps conditional formatting,
-page setup, frozen panes, data validation, merged cells and column widths, and
-still drops an Excel table (ListObject) and a defined name.
+That last row started at 0 of 8. Writing the task is what found it: a defined
+name, an Excel table, the document's own author and timestamps — everything the
+engine has no opinion about — was being dropped on every save, and the file was
+not even loading. An Excel table now also arrives as a block named after the
+table (`BLOCKREF("Sales","south","q1")` on a file nobody prepared), and goes
+back out as a table whose range follows the block it became.
 
 `"=SUM(A1:A2)"` in the third column is not a bug — openpyxl stores formulas
 without evaluating them, so no scenario can be read back and no inverse solve is
