@@ -1,178 +1,65 @@
 # logisheets-mcp
 
-**A real spreadsheet engine your AI agent can think in.**
+**A real spreadsheet engine your agent can think in.** Excel-compatible formulas
+it doesn't have to do in its head, structured memory it addresses by name, and a
+genuine `.xlsx` at the end that a person can open, audit and keep using.
 
-An [MCP](https://modelcontextprotocol.io) server that gives any LLM agent a
-real, Excel-compatible calculation engine — with structured memory it can
-address semantically, and a genuine `.xlsx` at the end that a human can open,
-audit, and keep using.
+An [MCP](https://modelcontextprotocol.io) server over
+[LogiSheets](https://github.com/logisky/LogiSheets), a spreadsheet engine written
+in Rust. MIT, runs on your machine, opens no sockets.
 
-Built on [LogiSheets](https://github.com/logisky/LogiSheets), a spreadsheet
-engine written in Rust. MIT licensed, self-hostable, no cloud dependency.
+---
 
-## Why
+Three things an agent is bad at on a grid, and does not have to do here.
 
-Agents are doing real work that is spreadsheet-shaped — financial models, data
-reconciliation, analysis — and they are bad at exactly the parts a spreadsheet
-engine is good at.
-
-**Arithmetic.** Agents mis-sum and mis-multiply. Here they don't have to: they
-write a formula and a deterministic engine evaluates it.
-
-**Memory.** Across a thirty-step task, intermediate state has to live
-*somewhere* structured. A context window is lossy and expensive; a code
-sandbox's variables vanish. This server gives the agent an external structured
-disk it reads and writes across the whole task.
-
-**Addressing.** Agents are bad at spatial reasoning, so a raw grid is a fragile
-surface — they lose track of where things are, and their own edits break their
-references. So the agent doesn't address `C7`. It addresses
-**`(block, row_key, field)`**:
-
-> set the `price` field of the `2025` record in the `revenue` block
-
-Insert a row, move the block, add a column — that address still resolves. This
-is the whole point: **memory that survives the agent's own edits.** What that
-buys, measured, is the next section.
-
-### What structure buys a model
-
-An agent's weakest faculty on a spreadsheet is bookkeeping: remembering where
-things are, and noticing when its own edits have invalidated the addresses it
-was relying on. A block removes the need for that bookkeeping rather than asking
-the model to be better at it. Concretely, from [the measurements](#measured-against-the-alternatives):
-
-**Addresses don't go stale.** Delete a projected year, insert two rows at the
-top and a column at the left, then ask for the answer again:
-`describe_block("val")` still returns it — 19.383943, correct for the edited
-model. The two coordinate-based servers return `#VALUE!` and a formula string,
-because `SUM(E11:E15)` and a terminal value reading `C15` no longer point where
-they did.
-
-**The file carries the meaning, so the context window doesn't have to.** Reopened
-in a fresh session, a field's rule reads
-`#FIELD("rev")*BLOCKREF("assum","margin","v")*(1-BLOCKREF("assum","tax","v"))`.
-Nothing has to be looked up to understand it, this session or any later one —
-2.4 kB to read the model back, against 21 kB of grid to parse and a `$B$3` still
-to decode.
-
-**A set can be named without knowing its size or where it sits.**
-`SUM(BLOCKREFS("proj","*","pv"))` is every row of a column, however many there
-are and wherever the block has moved to. There is no range to get wrong, which
-is why the aggregate above survived the edit that broke `SUM(E11:E15)`.
-
-**A rule is written once and covers rows that don't exist yet.** `set_field_rule`
-states how a field is computed for the field, not per cell; `add_block_rows`
-then materialises it on the new row. Four rules covered five projected years in
-the DCF, and a sixth year needs no formula work at all — which matters because
-authoring the same formula N times, with the row number adjusted, is exactly
-where a model makes silent arithmetic mistakes.
-
-**A mistake comes back as a refusal, not as a number.** A duplicate row key, a
-`#FIELD` naming a field that doesn't exist, a field rule written with a
-coordinate instead (a template applies to every row, so a fixed address in one
-cannot mean what it looks like), a parameter the tool doesn't have — each is
-rejected at the call, with the near miss named. A rejected call costs one retry;
-a plausible-looking wrong number costs the task.
-
-### vs. a Python sandbox
-
-A code interpreter can compute, but you get a throwaway script result. Here you
-get a real `.xlsx` with **live formulas still in it** — open it in Excel, change
-an input, and the model recalculates. It round-trips the human's existing files,
-and it runs on your machine, which matters when the data can't leave.
-
-## Measured against the alternatives
-
-The tasks were written down and committed *before* any other server was looked
-at ([`bench/TASKS.md`](bench/TASKS.md)), every expected value is derived
-independently in Python, and the harness is in [`bench/`](bench/) so you can
-re-run this and disagree with it. Two other servers that work on a local
-`.xlsx`: [spreadsheet-kit](https://github.com/PSU3D0/spreadsheet-mcp) 0.11.1,
-which has its own Rust recalc engine, and
-[excel-mcp-server](https://github.com/haris-musa/excel-mcp-server) 0.1.8, the
-most-installed one, built on openpyxl. Google Sheets connectors solve a
-different problem and are not here.
-
-| | logisheets-mcp | spreadsheet-kit | excel-mcp-server |
-| --- | --- | --- | --- |
-| Write a formula, read its value | **30** | **30** | `"=SUM(A1:A2)"` |
-| Five-year DCF, value per share | **20.803603** · 15 calls | **20.803603** · 6 calls | formula text |
-| 4×4 sensitivity, 16 answers | **all 16** · 1 call, 950 B | **all 16** · 16 calls, 1245 B | can't |
-| Solve backwards for an input | **0.080699** · 1 call, 202 B | **0.080699** · 18 calls, 1399 B | can't |
-| Reopen it later and explain it | 4 calls, **2.4 kB** | 5 calls, 21 kB | 2 calls, 24 kB |
-| Answer again after the shape changed | **19.383943** | `#VALUE!` | formula text |
-
-Three things in that table are worth spelling out.
-
-**openpyxl cannot evaluate.** `apply_formula` then `read_data_from_excel`
-returns the string `"=SUM(A1:A2)"`, not `30`. The file it writes is a correct
-model — reopen it in an engine and the DCF computes to 20.803603 — but nothing
-in the session can read an answer out of it, so no sensitivity table and no
-inverse solve are possible at all. This is structural, not a bug.
-
-**Building costs us more; asking costs us less.** The DCF took 15 calls against
-6, because those calls declare a schema rather than write cells. The bet is that
-you ask more often than you build, and asking is where it comes back: one call
-for a sixteen-cell sensitivity grid, one call to solve backwards. The other
-engine is entirely correct on both — it just has to be driven a scenario at a
-time.
-
-**Reading a model back is where the schema pays.** Same question — how is free
-cash flow computed? — to a file each server saved itself:
+### It doesn't do the arithmetic
 
 ```
-logisheets-mcp    #FIELD("rev") * BLOCKREF("assum","margin","v")
-                                * (1 - BLOCKREF("assum","tax","v"))
-spreadsheet-kit   B11*$B$3*(1-$B$4)
-excel-mcp-server  =B11*$B$3*(1-$B$4)
+set_field_rule   proj.pv = #FIELD("fcf") * #FIELD("df")
+describe_block   proj
+  →  Y1 147.2727   Y2 144.5950   Y3 141.9660   Y4 139.3848   Y5 136.8506
 ```
 
-All three are correct. Only the first is an *answer*: the others send the agent
-to read A3 to find out what `$B$3` is, and again next session, because the file
-records no meaning. That is the 2.4 kB against 21 kB in the table — a tenth of
-the context for a better answer.
+The rule is stated once, **for the field** — not per cell. Five years of it
+materialise, and a sixth computes the moment a row is added, with no formula
+written for it. Writing the same formula N times with the row number adjusted is
+precisely where a model makes a silent mistake.
 
-Then the shape changes. Delete a projected year, insert two rows at the top and
-a column at the left — through each server's own row and column tools — and ask
-for the value per share again. `SUM(E11:E15)` and the terminal-value references
-to `C15` no longer point where they used to, and two of the three models stop
-computing. `SUM(BLOCKREFS("proj","*","pv"))` never referred to a position, so
-there is nothing to fix; the answer is read back by name.
+### It doesn't keep track of where anything is
 
-### Where they are better
+```
+… the sheet is reshaped: a projected year deleted,
+  two rows inserted at the top, a column at the left …
 
-Not a clean sweep, and the parts that are not deserve saying.
+describe_block   val
+  →  per_share 19.383943        ← still right, nothing re-derived
+```
 
-spreadsheet-kit is a genuine peer, correct on every task it can attempt, and has
-things this server does not: forks with undo, branching and checkpoints,
-LibreOffice-backed screenshots, and region detection that picked the assumptions
-block out of an unlabelled sheet at 0.70 confidence unprompted. Its 53 tools
-cover ground our 20 do not. excel-mcp-server has charts, pivot tables and cell
-formatting, none of which are here.
+Same question, same address, after the shape changed underneath it.
+`SUM(BLOCKREFS("proj","*","pv"))` never referred to a position, so the edit had
+nothing to break. A model that spent its attention on bookkeeping — *did my rows
+shift? is my range still right?* — spends none of it here.
 
-And a caveat on the reading task: each server was reading back a file *it* had
-written, so ours had blocks in it because we put them there. On a plain
-spreadsheet from a person, `convert_to_block` adopts the table first — it reads
-the field names off the header row and works out the key column — after which
-`BLOCKREFS` by name works. But the individual cell formulas stay in
-coordinates, so that half of the advantage does not transfer, and the honest
-version of the comparison says so.
+### It doesn't burn context on round trips
 
-### The bench found our bugs first
+```
+preview_changes  scenarios: WACC × terminal growth, 4 × 4
+  →  16 answers, one call, 950 bytes, nothing written to the workbook
 
-Its first run had us returning `0` instead of `30`: the seed workbook was
-written by openpyxl, our reader panicked on an absolute relationship target and
-then on a `docProps` without the children it assumed, and the session carried on
-against an empty workbook. Building the rest of it turned up more — every
-inline-string label in a file dropped on the way in, so a header row read as
-empty; adopting a table freezing the model it adopted into static numbers while
-reporting success.
+goal_seek        per_share = 30, by varying WACC
+  →  0.080699, one call
+```
 
-The failure mode was the same every time: a wrong answer, reported as a success,
-never a crash. Fuzzing had not found any of them. That is the argument for
-testing this way rather than with a feature matrix.
+A whole sensitivity table and an inverse solve are single questions, asked on a
+temp branch that is discarded. No loop of write-recalculate-read, and no risk of
+leaving a scenario behind in the model.
 
+---
+
+**And the file at the end is a real spreadsheet.** Live formulas, not baked
+numbers — open it in Excel, change an input, watch it recompute. Formulas can be
+written out as `BLOCKREF("proj","Y3","pv")` for a person to read, or resolved to
+plain coordinates for Excel to chew on.
 ## Install
 
 Requires Node 20+.
@@ -345,6 +232,110 @@ Because blocks are created *by the agent as it works*, this needs no
 pre-prepared file — you can point it at a blank workbook or at a spreadsheet
 someone sent you.
 
+## Getting the file back
+
+`save_workbook` writes a real `.xlsx` and its result carries an MCP
+**resource link** — a uri, media type and size — not the file. The workbook is
+also listed as a resource (`workbook://current.xlsx`), so a host that wants the
+bytes reads them with `resources/read` and hands the human a download.
+
+That split is the point: a tool result goes into the model's context, where a
+200 KB workbook would cost roughly 280 KB of text and teach the model nothing.
+The link costs a line. `export_xlsx` still returns base64 for hosts that
+implement no resources at all, but it is the fallback, not the mechanism.
+
+Reads go through the same serialization lane as tool calls, so a host fetching
+the file can never catch a half-applied transaction.
+
+`open_workbook` and `save_workbook` read and write wherever the server process
+can — normal for a local stdio server, and the same posture as the official
+filesystem server. Both are marked as mutating so a host can prompt before they
+run; if you need tighter limits, run the server as a user with only the access
+you intend it to have.
+
+## State model
+
+One MCP session holds one active workbook, alive across tool calls — that
+persistence is what makes it memory rather than a calculator. `open_workbook`
+replaces it. Multiple named workbooks per session may come later.
+
+## No network
+
+The server opens no sockets and listens on no ports. "stdio transport" is
+literal: your MCP host spawns this as a child process and they exchange
+newline-delimited JSON-RPC over its stdin and stdout — the same pipes any
+command-line program gets. The engine is WASM running in that same process,
+so a formula is a function call, not a request.
+
+Checked rather than asserted. After a full session — create a block, attach a
+field rule, evaluate a formula, save an `.xlsx` — the process holds:
+
+```
+fd types: {CHR: 2, DIR: 4, KQUEUE: 3, PIPE: 6, REG: 13}
+network files (lsof -a -i):     0
+unix sockets  (lsof -a -U):     0
+listening ports:                0
+```
+
+Six pipes, no sockets. Nothing is uploaded, no telemetry is collected, and an
+air-gapped machine is a supported way to run this. The only things it touches
+outside its own memory are the files you name — see the filesystem note under
+[Getting the file back](#getting-the-file-back).
+
+That is the `logisheets-mcp` binary, which is what an MCP host runs. Using it
+[as a library](#use-as-a-library) you can attach any transport you like,
+including an HTTP one — but then the socket is yours, opened deliberately.
+
+## Benchmarks
+
+The claims above are measured, not asserted. The harness is in
+[`bench/`](bench/): tasks written down and committed *before* any other server
+was looked at ([`bench/TASKS.md`](bench/TASKS.md)), every expected value derived
+independently in Python, so you can re-run it and disagree.
+
+Against the two other MCP servers that work on a local `.xlsx` —
+[spreadsheet-kit](https://github.com/PSU3D0/spreadsheet-mcp) 0.11.1, which has
+its own Rust recalc engine, and
+[excel-mcp-server](https://github.com/haris-musa/excel-mcp-server) 0.1.8, the
+most-installed one, on openpyxl:
+
+| | this | spreadsheet-kit | excel-mcp-server |
+| --- | --- | --- | --- |
+| Write a formula, read its value | **30** | **30** | `"=SUM(A1:A2)"` |
+| Five-year DCF, value per share | **20.803603** · 15 calls | **20.803603** · 6 calls | formula text |
+| 4×4 sensitivity, 16 answers | **1 call**, 950 B | 16 calls, 1245 B | can't |
+| Solve backwards for an input | **1 call**, 202 B | 18 calls, 1399 B | can't |
+| Reopen it later and explain it | 4 calls, **2.4 kB** | 5 calls, 21 kB | 2 calls, 24 kB |
+| Answer again after the shape changed | **19.383943** | `#VALUE!` | formula text |
+| Keep a handed-over file's features | 6 of 8 | **8 of 8** | **8 of 8** |
+
+The last row is ours to fix: an open-write-save keeps conditional formatting,
+page setup, frozen panes, data validation, merged cells and column widths, and
+still drops an Excel table (ListObject) and a defined name.
+
+`"=SUM(A1:A2)"` in the third column is not a bug — openpyxl stores formulas
+without evaluating them, so no scenario can be read back and no inverse solve is
+possible. It writes a correct model; it just cannot answer a question about one.
+
+spreadsheet-kit is a genuine peer, correct on everything it can attempt, and
+needed fewer calls than we did to build the model — our extra calls declare a
+schema rather than write cells, which is the trade that pays off in the rows
+below it. It also has forks with undo, branching and checkpoints, and
+LibreOffice-backed screenshots, none of which are here.
+
+One caveat on the reading row: each server was reading back a file *it* wrote,
+so ours had blocks in it because we put them there. Given a plain spreadsheet
+from a person, `convert_to_block` adopts the table first — reading the field
+names off the header row and working out the key column — and then `BLOCKREFS`
+by name works. The individual cell formulas stay in coordinates, so only half of
+that advantage transfers.
+
+Building this turned up defect after defect in our own engine before it said
+anything about anyone else's: a workbook openpyxl wrote failing to load, every
+inline-string label dropped on the way in, adoption freezing the model it
+adopted into static numbers. Every one presented as a wrong answer reported as a
+success — never as a crash — and fuzzing had found none of them.
+
 ## Use as a library
 
 ```ts
@@ -415,60 +406,6 @@ before publishing, not after.
 Registry auth needs no secret: the workflow authenticates with GitHub OIDC,
 which is what grants the `io.github.logisky/` namespace. The one secret is
 `NPM_TOKEN`.
-
-## Getting the file back
-
-`save_workbook` writes a real `.xlsx` and its result carries an MCP
-**resource link** — a uri, media type and size — not the file. The workbook is
-also listed as a resource (`workbook://current.xlsx`), so a host that wants the
-bytes reads them with `resources/read` and hands the human a download.
-
-That split is the point: a tool result goes into the model's context, where a
-200 KB workbook would cost roughly 280 KB of text and teach the model nothing.
-The link costs a line. `export_xlsx` still returns base64 for hosts that
-implement no resources at all, but it is the fallback, not the mechanism.
-
-Reads go through the same serialization lane as tool calls, so a host fetching
-the file can never catch a half-applied transaction.
-
-`open_workbook` and `save_workbook` read and write wherever the server process
-can — normal for a local stdio server, and the same posture as the official
-filesystem server. Both are marked as mutating so a host can prompt before they
-run; if you need tighter limits, run the server as a user with only the access
-you intend it to have.
-
-## State model
-
-One MCP session holds one active workbook, alive across tool calls — that
-persistence is what makes it memory rather than a calculator. `open_workbook`
-replaces it. Multiple named workbooks per session may come later.
-
-## No network
-
-The server opens no sockets and listens on no ports. "stdio transport" is
-literal: your MCP host spawns this as a child process and they exchange
-newline-delimited JSON-RPC over its stdin and stdout — the same pipes any
-command-line program gets. The engine is WASM running in that same process,
-so a formula is a function call, not a request.
-
-Checked rather than asserted. After a full session — create a block, attach a
-field rule, evaluate a formula, save an `.xlsx` — the process holds:
-
-```
-fd types: {CHR: 2, DIR: 4, KQUEUE: 3, PIPE: 6, REG: 13}
-network files (lsof -a -i):     0
-unix sockets  (lsof -a -U):     0
-listening ports:                0
-```
-
-Six pipes, no sockets. Nothing is uploaded, no telemetry is collected, and an
-air-gapped machine is a supported way to run this. The only things it touches
-outside its own memory are the files you name — see the filesystem note under
-[Getting the file back](#getting-the-file-back).
-
-That is the `logisheets-mcp` binary, which is what an MCP host runs. Using it
-[as a library](#use-as-a-library) you can attach any transport you like,
-including an HTTP one — but then the socket is yours, opened deliberately.
 
 ## License
 
