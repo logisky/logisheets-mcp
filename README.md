@@ -41,6 +41,97 @@ get a real `.xlsx` with **live formulas still in it** — open it in Excel, chan
 an input, and the model recalculates. It round-trips the human's existing files,
 and it runs on your machine, which matters when the data can't leave.
 
+## Measured against the alternatives
+
+The tasks were written down and committed *before* any other server was looked
+at ([`bench/TASKS.md`](bench/TASKS.md)), every expected value is derived
+independently in Python, and the harness is in [`bench/`](bench/) so you can
+re-run this and disagree with it. Two other servers that work on a local
+`.xlsx`: [spreadsheet-kit](https://github.com/PSU3D0/spreadsheet-mcp) 0.11.1,
+which has its own Rust recalc engine, and
+[excel-mcp-server](https://github.com/haris-musa/excel-mcp-server) 0.1.8, the
+most-installed one, built on openpyxl. Google Sheets connectors solve a
+different problem and are not here.
+
+| | logisheets-mcp | spreadsheet-kit | excel-mcp-server |
+| --- | --- | --- | --- |
+| Write a formula, read its value | **30** | **30** | `"=SUM(A1:A2)"` |
+| Five-year DCF, value per share | **20.803603** · 15 calls | **20.803603** · 6 calls | formula text |
+| 4×4 sensitivity, 16 answers | **all 16** · 1 call, 950 B | **all 16** · 16 calls, 1245 B | can't |
+| Solve backwards for an input | **0.080699** · 1 call, 202 B | **0.080699** · 18 calls, 1399 B | can't |
+| Reopen it later and explain it | 4 calls, **2.4 kB** | 5 calls, 21 kB | 2 calls, 24 kB |
+| Answer again after the shape changed | **19.383943** | `#VALUE!` | formula text |
+
+Three things in that table are worth spelling out.
+
+**openpyxl cannot evaluate.** `apply_formula` then `read_data_from_excel`
+returns the string `"=SUM(A1:A2)"`, not `30`. The file it writes is a correct
+model — reopen it in an engine and the DCF computes to 20.803603 — but nothing
+in the session can read an answer out of it, so no sensitivity table and no
+inverse solve are possible at all. This is structural, not a bug.
+
+**Building costs us more; asking costs us less.** The DCF took 15 calls against
+6, because those calls declare a schema rather than write cells. The bet is that
+you ask more often than you build, and asking is where it comes back: one call
+for a sixteen-cell sensitivity grid, one call to solve backwards. The other
+engine is entirely correct on both — it just has to be driven a scenario at a
+time.
+
+**Reading a model back is where the schema pays.** Same question — how is free
+cash flow computed? — to a file each server saved itself:
+
+```
+logisheets-mcp    #FIELD("rev") * BLOCKREF("assum","margin","v")
+                                * (1 - BLOCKREF("assum","tax","v"))
+spreadsheet-kit   B11*$B$3*(1-$B$4)
+excel-mcp-server  =B11*$B$3*(1-$B$4)
+```
+
+All three are correct. Only the first is an *answer*: the others send the agent
+to read A3 to find out what `$B$3` is, and again next session, because the file
+records no meaning. That is the 2.4 kB against 21 kB in the table — a tenth of
+the context for a better answer.
+
+Then the shape changes. Delete a projected year, insert two rows at the top and
+a column at the left — through each server's own row and column tools — and ask
+for the value per share again. `SUM(E11:E15)` and the terminal-value references
+to `C15` no longer point where they used to, and two of the three models stop
+computing. `SUM(BLOCKREFS("proj","*","pv"))` never referred to a position, so
+there is nothing to fix; the answer is read back by name.
+
+### Where they are better
+
+Not a clean sweep, and the parts that are not deserve saying.
+
+spreadsheet-kit is a genuine peer, correct on every task it can attempt, and has
+things this server does not: forks with undo, branching and checkpoints,
+LibreOffice-backed screenshots, and region detection that picked the assumptions
+block out of an unlabelled sheet at 0.70 confidence unprompted. Its 53 tools
+cover ground our 20 do not. excel-mcp-server has charts, pivot tables and cell
+formatting, none of which are here.
+
+And a caveat on the reading task: each server was reading back a file *it* had
+written, so ours had blocks in it because we put them there. On a plain
+spreadsheet from a person, `convert_to_block` adopts the table first — it reads
+the field names off the header row and works out the key column — after which
+`BLOCKREFS` by name works. But the individual cell formulas stay in
+coordinates, so that half of the advantage does not transfer, and the honest
+version of the comparison says so.
+
+### The bench found our bugs first
+
+Its first run had us returning `0` instead of `30`: the seed workbook was
+written by openpyxl, our reader panicked on an absolute relationship target and
+then on a `docProps` without the children it assumed, and the session carried on
+against an empty workbook. Building the rest of it turned up more — every
+inline-string label in a file dropped on the way in, so a header row read as
+empty; adopting a table freezing the model it adopted into static numbers while
+reporting success.
+
+The failure mode was the same every time: a wrong answer, reported as a success,
+never a crash. Fuzzing had not found any of them. That is the argument for
+testing this way rather than with a feature matrix.
+
 ## Install
 
 Requires Node 20+.
