@@ -7,7 +7,7 @@
 // unreleased engine changes. A published tarball must depend on the registry
 // instead, so run this (and commit the result) as part of a release:
 //
-//   node scripts/release-deps.mjs 1.12.0     # pin to a released engine version
+//   node scripts/release-deps.mjs 1.13.0     # pin to a released engine version
 //   npm publish
 //
 // Pass no argument to reuse whatever caret range is already recorded below.
@@ -19,8 +19,8 @@ import {fileURLToPath} from 'node:url'
 const PKG = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json')
 /** Local deps that must become registry ranges, with their fallback version. */
 const LOCAL_DEPS = {
-    'logisheets-logician': '1.12.0',
-    'logisheets-runtime': '1.12.0',
+    'logisheets-logician': '1.13.0',
+    'logisheets-runtime': '1.13.0',
 }
 
 const version = process.argv[2]
