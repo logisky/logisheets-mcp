@@ -29,17 +29,17 @@ jobs:
       # `package-manager-cache: false` is from the same example — npm says not to
       # cache in a release build, and a restored cache is the one input to a
       # publish that did not come from this commit.
-      # NO `registry-url`, and that is the whole fix. Given one, `setup-node`
-      # writes an `.npmrc` holding `_authToken=${NODE_AUTH_TOKEN}` and exports
-      # NODE_AUTH_TOKEN as the placeholder `XXXXX-XXXXX-XXXXX-XXXXX` so that
-      # line stays valid. npm then sees a credential already configured, uses
-      # it instead of asking for an OIDC token, and the registry refuses the
-      # nonsense — as E404 on PUT, which reads like "no such package" and is
-      # really "not you". registry.npmjs.org is npm's default anyway, so the
-      # input bought nothing and cost the entire trusted-publishing path.
+      # `registry-url` is back, as npm's own example has it. Removing it did
+      # change the error — E404 became ENEEDAUTH — but not the cause. npm 11.5.1+
+      # prefers OIDC over any configured token, so the placeholder `.npmrc` that
+      # `registry-url` produces is not what stood in the way: with a matching
+      # trusted publisher, OIDC wins; without one, npm falls back, and the two
+      # errors are just which fallback was available. Same root cause either way,
+      # and it is not in this file.
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       # What the last failure could not tell us. It reported E404 on PUT with no
