@@ -23,11 +23,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Trusted publishing needs Node 22.14.0 or newer. On Node 20 the
+          # publish step failed with ENEEDAUTH: that npm has no OIDC support at
+          # all, so it went looking for a token instead.
+          node-version: 22
           cache: npm
-          # Required for NODE_AUTH_TOKEN to reach npm; without it `npm publish`
-          # fails with ENEEDAUTH even though the secret is set.
+          # Points npm at the registry it will authenticate to over OIDC.
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing also needs npm 11.5.1 or newer, and Node 22 still
+      # bundles a 10.x. Installing it explicitly pins the requirement to this
+      # line rather than to whichever npm a Node release happens to carry.
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -56,18 +63,24 @@ jobs:
 
       # Skipped when that exact version is already on npm, so the job can be
       # re-run after a failure further down without dying here on E403.
-      # --provenance links the tarball to this commit and workflow, verifiable
-      # by anyone installing it; it needs the id-token permission above.
+      #
+      # No token: the package is configured as a trusted publisher on npm, so
+      # this workflow's own OIDC identity is the credential — which is what the
+      # `id-token: write` permission above is for. Provenance is generated
+      # automatically on that path, so `--provenance` is not passed; asking for
+      # it explicitly would only duplicate what npm already does.
+      #
+      # If npm's trusted-publisher settings ever name an ENVIRONMENT, this job
+      # has to declare the same one (`environment: <name>`) or the identity will
+      # not match. It names none today, so neither does this.
       - name: Publish to npm
         run: |
           spec="${{ steps.release.outputs.name }}@${{ steps.release.outputs.version }}"
           if npm view "$spec" version >/dev/null 2>&1; then
             echo "$spec is already on npm — skipping publish"
           else
-            npm publish --provenance
+            npm publish
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install mcp-publisher
         run: |
