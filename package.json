@@ -1,6 +1,6 @@
 {
     "name": "logisheets-mcp",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "An MCP server that gives an AI agent a real, Excel-compatible spreadsheet engine to compute in and remember in — deterministic formulas, structured block memory addressed by (block, key, field), and a real .xlsx out.",
     "mcpName": "io.github.logisky/logisheets-mcp",
     "type": "module",
