@@ -19,22 +19,34 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      # Shaped after npm's own trusted-publishing example, deliberately: Node 24
+      # because OIDC needs Node 22.14+ AND npm 11.5.1+, and 24 is the first line
+      # whose BUNDLED npm clears that on its own. Node 20 failed with ENEEDAUTH
+      # (npm 10 has no OIDC path at all) and Node 22 ships a 10.x too.
+      #
+      # `package-manager-cache: false` is from the same example — npm says not to
+      # cache in a release build, and a restored cache is the one input to a
+      # publish that did not come from this commit.
+      - uses: actions/setup-node@v6
         with:
-          # Trusted publishing needs Node 22.14.0 or newer. On Node 20 the
-          # publish step failed with ENEEDAUTH: that npm has no OIDC support at
-          # all, so it went looking for a token instead.
-          node-version: 22
-          cache: npm
-          # Points npm at the registry it will authenticate to over OIDC.
+          node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
-      # Trusted publishing also needs npm 11.5.1 or newer, and Node 22 still
-      # bundles a 10.x. Installing it explicitly pins the requirement to this
-      # line rather than to whichever npm a Node release happens to carry.
-      - run: npm install -g npm@latest
+      # What the last failure could not tell us. It reported E404 on PUT with no
+      # mention of OIDC anywhere in the log, which has two very different causes
+      # — an npm too old to try, or an npm that tried and was refused — and the
+      # log did not say which. Print the version, and whether setup-node left an
+      # auth line in .npmrc, so the next run is diagnosable from its own output.
+      - name: Show what will publish
+        run: |
+          echo "node $(node --version), npm $(npm --version)"
+          echo "OIDC request URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}${ACTIONS_ID_TOKEN_REQUEST_URL:-no}"
+          for f in ~/.npmrc ./.npmrc; do
+            [ -f "$f" ] && echo "--- $f" && sed 's/=.*/=<redacted>/' "$f"
+          done
 
       - run: npm ci
 
