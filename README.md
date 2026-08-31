@@ -1,5 +1,7 @@
 # logisheets-mcp
 
+[![logsky/logisheets-mcp](https://glama.ai/mcp/servers/logisky/logisheets-mcp/badges/score.svg)](https://glama.ai/mcp/servers/logisky/logisheets-mcp)
+
 **A real spreadsheet engine your agent can think in.** Excel-compatible formulas
 it doesn't have to do in its head, a table it addresses by name instead of by
 coordinate, and a genuine `.xlsx` at the end that a person can open, audit and
