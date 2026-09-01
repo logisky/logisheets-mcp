@@ -58,6 +58,39 @@ at a blank workbook or at a spreadsheet someone emailed you — `convert_to_bloc
 adopts a table that is already in ordinary cells, reading the field names off the
 header row and working out which column is the key.
 
+## The second session
+
+The conversation that builds a spreadsheet is almost never the conversation that
+has to answer a question about it. A week later there is a new session, with
+none of the context, holding only the file — and what the file records is what
+that session can know.
+
+A grid records coordinates. `=B11*$B$3*(1-$B$4)` is correct and means nothing
+until the agent fetches the label column and *infers* that `A3` describes `B3`.
+The schema is where the meaning goes instead, and it is written into the
+`.xlsx`: field names, the key column, which fields the engine computes, and the
+rule behind each one. One `list_blocks` call and the workbook introduces itself;
+one `describe_block` and the rules come back as
+`#FIELD("revenue")*BLOCKREF("assum","margin","v")` — an explanation rather than
+a second lookup problem.
+
+[`src/cold-read.test.ts`](src/cold-read.test.ts) pins that down rather than
+asserting it. It builds a model in one session, saves it, and reopens the file
+in a second session sharing nothing with the first — own server, own workbook,
+no memory. Then: `list_blocks` recovers every block's fields, key field,
+computed fields and row count in one call; every returned rule is checked to
+contain `#FIELD` or `BLOCKREF` and **no A1 coordinate at all**; the fresh
+session writes a `BLOCKREF` formula from orientation alone and the engine agrees
+with arithmetic done independently in the test; and `trace` names what reads an
+assumption before anyone edits it. Cost is metered on the wire, over the same
+text a host shows the model: **540 B for a five-row model, 545 B for a
+hundred-and-five-row one**, one call each. Reading a schema is `O(columns)`;
+reading a grid to understand it is `O(cells)`. Asking for the data still costs
+what the data costs — 11 kB for those 105 rows — and the point is that the
+second session gets to choose.
+
+Longer version, with the reasoning: [`docs/the-second-session.md`](docs/the-second-session.md).
+
 ## Benchmarks
 
 Measured, not asserted. Against the two other MCP servers that work on a local
