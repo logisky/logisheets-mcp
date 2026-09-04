@@ -74,6 +74,13 @@ one `describe_block` and the rules come back as
 `#FIELD("revenue")*BLOCKREF("assum","margin","v")` — an explanation rather than
 a second lookup problem.
 
+The schema still only says what *shape* the records are. What they **mean** is
+prose, so a block carries a description: a sentence or two on `create_block`, or
+`set_block_description` for a table adopted later, saying what one row is, what
+the non-obvious fields hold, and what a later reader must not touch. It is
+stored in the file and comes back from `describe_block`, which is the difference
+between the next session reading the intent and inferring it from column names.
+
 [`src/cold-read.test.ts`](src/cold-read.test.ts) pins that down rather than
 asserting it. It builds a model in one session, saves it, and reopens the file
 in a second session sharing nothing with the first — own server, own workbook,
@@ -90,6 +97,33 @@ what the data costs — 11 kB for those 105 rows — and the point is that the
 second session gets to choose.
 
 Longer version, with the reasoning: [`docs/the-second-session.md`](docs/the-second-session.md).
+
+## Charts that recompute
+
+An agent asked for a chart usually renders an image. The image is right once,
+and then the human changes an assumption and it is a picture of a number that is
+no longer true.
+
+`chart_from_block` writes a chart into the workbook instead, and a chart there
+stores *references*, never values:
+
+```
+chart_from_block   rev   value_fields: q1, q2   category_field: region
+  →  <c:val><c:numRef><c:f>Rev!$B$1:$B$3</c:f></c:numRef>
+```
+
+That is a native Excel `c:chartSpace` in the saved `.xlsx` — the same object
+Excel writes itself. Edit a source cell and the chart follows, in Excel or here.
+Add a region to the block and it appears in the chart on its own, because the
+series is bound to the *field*, not to the cells the field happened to occupy
+when the chart was made: inserting rows or columns cannot leave it pointing
+somewhere wrong. `chart_insert` does the same for arbitrary A1 ranges, for data
+that never became a block.
+
+[`src/agent-loop.test.ts`](src/agent-loop.test.ts) asserts this from the file's
+bytes rather than from the tool's return value: build a block, chart it, save,
+unzip the `.xlsx` and check that the chart part exists and that its series are
+`<c:f>` references into the sheet.
 
 ## Benchmarks
 
@@ -175,8 +209,8 @@ every claim as it goes.
 
 ## Tools
 
-Twenty by default. Tool-selection accuracy falls as the list grows and every
-description costs context on every turn.
+Twenty-six by default. Tool-selection accuracy falls as the list grows and
+every description costs context on every turn.
 
 | Tool | What it does |
 | --- | --- |
@@ -184,10 +218,11 @@ description costs context on every turn.
 | `save_workbook` | Write a real `.xlsx`. This is how work gets handed back. |
 | `export_xlsx` | The file as base64, for hosts with no shared filesystem. |
 | `list_blocks` | Every sheet and block, plus where the next block should go. |
-| `describe_block` | A block's schema, keys, field rules, and optionally its values. |
+| `describe_block` | A block's schema, keys, field rules, description, and optionally its values. |
 | `eval_formula` | Evaluate a formula and return the value. Nothing is stored. |
 | `create_block` | Create a named table. First field is the row key. |
 | `convert_to_block` | Adopt a table that is already in ordinary cells, in place. |
+| `set_block_description` | Write what a block is for, in prose, into the file. |
 | `add_block_rows` | Add records — at the end, or `after_key` / `before_key`. |
 | `delete_block_rows` | Remove records. |
 | `move_block_row` | Reorder rows by key. Presentation only: no value changes. |
@@ -198,6 +233,11 @@ description costs context on every turn.
 | `trace` | What a cell reads, and what reads it, from the dependency graph. |
 | `goal_seek` | What input makes an output hit a target. Searches inside the engine. |
 | `create_sheet` | Add a sheet. |
+| `chart_from_block` | Chart a block by naming its fields. Follows rows added later. |
+| `chart_insert` | Chart arbitrary A1 ranges — the raw-cell counterpart. |
+| `chart_list` | The charts on a sheet: type, title, and the ranges each series reads. |
+| `chart_update` | Reconfigure a chart in place — type, series, axes, labels. |
+| `chart_delete` | Remove a chart. |
 | `get_cells` / `set_cells` | Raw-cell escape hatch for data with no structure. |
 
 Formulas are Excel-compatible plus `BLOCKREF(block, key, field)` for reading a
@@ -212,10 +252,16 @@ the workbook, and an inverse solve is one call rather than one per bisection
 step. `trace` answers the question formula text cannot — not what a cell reads,
 but what reads *it*, which is what you want before touching an assumption.
 
-Set `LOGISHEETS_MCP_TOOLS=full` for 50: undo/redo, formatting, merges, comments,
-checkpoints, block move/resize, cross-block links, raw row/column structure.
-Mutating tools carry MCP's `readOnlyHint` / `destructiveHint` annotations so a
-host can gate them behind approval.
+Set `LOGISHEETS_MCP_TOOLS=full` for 64: undo/redo, formatting, merges, comments,
+checkpoints, block move/resize, cross-block links, block permissions,
+`chart_suggest`, raw row/column structure. Mutating tools carry MCP's
+`readOnlyHint` / `destructiveHint` annotations so a host can gate them behind
+approval.
+
+Chart tools keep a namespace prefix where every other tool drops one. Inside
+their namespace they are called `list`, `insert`, `update` and `delete`, and a
+bare `delete` sitting next to `delete_rows` and `delete_block_rows` is a coin
+flip for the model — which is the cost this whole section exists to avoid.
 
 ## The file you get back
 

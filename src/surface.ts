@@ -7,7 +7,7 @@
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 19 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 26 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -15,6 +15,7 @@ import {
     BLOCK_OPS_TOOLS,
     BUILDER_TOOLS,
     CELL_TOOLS,
+    CHART_TOOLS,
     COMMENT_TOOLS,
     EDIT_TOOLS,
     FORMAT_TOOLS,
@@ -29,6 +30,32 @@ import {createLifecycleTools} from './lifecycle.js'
 import type {WorkbookSession} from './session.js'
 
 export type ToolMode = 'core' | 'full'
+
+/**
+ * Namespaces whose tools keep their prefix in the model-facing name.
+ *
+ * This server drops logician's namespace (`build__create_block` becomes
+ * `create_block`) because MCP hosts already prefix every tool by server, so the
+ * namespace is context spent twice. That holds while the bare name still says
+ * what the tool does — and it stops holding at charts, which logician names
+ * `list`, `insert`, `update`, `delete` and `suggest` inside their namespace.
+ * Those would sit in the same flat list as `list_blocks`, `insert_rows` and
+ * `delete_rows`, and a bare `delete` next to those is a coin flip for exactly
+ * the reason this file exists. They keep the prefix.
+ */
+const PREFIXED_NAMESPACES: ReadonlySet<string> = new Set(['chart'])
+
+/**
+ * The name a tool goes on the wire under — what the model sees and calls.
+ *
+ * Callers must key their tool map by this, not by `tool.name`, or a call comes
+ * back for a name nothing is registered under.
+ */
+export function mcpName(t: Tool): string {
+    return PREFIXED_NAMESPACES.has(t.namespace)
+        ? `${t.namespace}_${t.name}`
+        : t.name
+}
 
 /**
  * The core surface, in the order an agent meets it: orient, build structured
@@ -55,6 +82,11 @@ const CORE_IDS: readonly string[] = [
     // makes it addressable in place. Without it an agent given a legacy file has
     // only the destructive half of the pair.
     'build__convert_to_block',
+    // The schema says what shape the records are; only this says what they
+    // mean. `create_block` takes a description inline, so this is for the case
+    // that inline cannot cover: a table adopted with `convert_to_block`, or a
+    // block whose purpose is only clear once it has been built.
+    'build__set_block_description',
     'build__add_block_rows',
     'build__delete_block_rows',
     // Row order is presentation, not model — but the presentation is part of
@@ -88,6 +120,27 @@ const CORE_IDS: readonly string[] = [
     // whole search on the temp branch inside one call — as a conversation it is
     // one round trip per bisection step, and it changes nothing either way.
     'edit__goal_seek',
+    // Charts. A chart stores references, not numbers, so it is part of the
+    // model rather than a picture of it: the .xlsx the human opens recomputes
+    // its chart when they change an assumption, exactly as its formulas do.
+    // That is the whole reason charting belongs next to the engine and not in
+    // an image the model draws.
+    //
+    // `from_block` first because it is the idiom this server pushes — name the
+    // fields, and the chart follows rows being added and columns moving, the
+    // same guarantee blocks give formulas. `insert` is its raw-range
+    // counterpart, for the same data that would use `get_cells` / `set_cells`.
+    'chart__from_block',
+    'chart__insert',
+    // `list` is orientation — the chart half of `list_blocks`, and the only
+    // source of the chart ids the next two take. Then the pair that makes a
+    // chart correctable: `update` for a chart pointing at the wrong series or
+    // drawn as the wrong type, `delete` for one on the wrong sheet, which
+    // `update` cannot move. Without them a first guess is permanent in the
+    // file the human is handed.
+    'chart__list',
+    'chart__update',
+    'chart__delete',
 ]
 
 /**
@@ -122,6 +175,7 @@ function allEngineTools(): Tool[] {
         ...COMMENT_TOOLS,
         ...BLOCK_OPS_TOOLS,
         ...LINK_TOOLS,
+        ...CHART_TOOLS,
     ]
 }
 

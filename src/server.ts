@@ -21,7 +21,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js'
 import type {Tool, ToolContext} from 'logisheets-logician'
 import {WorkbookSession} from './session.js'
-import {selectTools, toolModeFromEnv, type ToolMode} from './surface.js'
+import {mcpName, selectTools, toolModeFromEnv, type ToolMode} from './surface.js'
 import {validateToolInput} from './validate.js'
 import {
     TOOLS_YIELDING_WORKBOOK,
@@ -39,13 +39,16 @@ export const SERVER_VERSION = '0.1.0'
 export const INSTRUCTIONS = [
     'A real, Excel-compatible spreadsheet engine you can compute in and remember in.',
     '',
-    'Two things it is for:',
+    'Three things it is for:',
     '  1. Arithmetic you should not do yourself. Write a formula and let the engine evaluate it — `eval_formula` for a one-off, or store the formula in a cell so it keeps recalculating.',
     '  2. Structured memory that survives the whole task. A *block* is a named table; you address its cells by (block name, row key, field name), never by A1 coordinates. Inserting rows never breaks a reference, so you can keep building without tracking where anything sits.',
+    '  3. Charts that stay live. `chart_from_block` plots a block by field name and the chart follows the data — rows added later appear on their own. Never draw a picture of the numbers; make the workbook hold the chart, so it redraws when the human changes an assumption in Excel.',
     '',
     'The loop: `list_blocks` to see what you have, `create_block` to open a structured workspace, `add_block_rows` / `set_block_cells` to fill it, formulas for the math, `describe_block` to read results back, `save_workbook` to hand the human a real .xlsx.',
     '',
     'Prefer blocks over raw cells. `get_cells` / `set_cells` exist for data that genuinely has no structure.',
+    '',
+    'Write down what a block is for — a sentence on `create_block`, or `set_block_description` afterwards. `describe_block` gives it back, so it is what the next session (yours or someone else\'s) reads instead of guessing the meaning from column names.',
 ].join('\n')
 
 export interface CreateServerOptions {
@@ -75,8 +78,10 @@ function toMcpTool(t: Tool): McpTool {
     return {
         // logician namespaces tools (`build__create_block`) to keep crafts from
         // colliding. MCP hosts already prefix by server, so the namespace would
-        // just be noise in the model's context; names are asserted unique below.
-        name: t.name,
+        // just be noise in the model's context — `mcpName` drops it, except
+        // where the bare name would be ambiguous. Names are asserted unique
+        // below.
+        name: mcpName(t),
         description: t.description,
         // Spread first: a tool's own `type` must not shadow 'object', which is
         // what MCP requires at the top level of a tool's input schema.
@@ -104,12 +109,13 @@ export function createServer(opts: CreateServerOptions = {}): CreatedServer {
 
     const tools = new Map<string, Tool>()
     for (const t of selectTools(session, mode)) {
-        if (tools.has(t.name)) {
+        const name = mcpName(t)
+        if (tools.has(name)) {
             throw new Error(
-                `two tools share the MCP name "${t.name}" — namespaces differ but names must be unique`
+                `two tools share the MCP name "${name}" — namespaces differ but names must be unique`
             )
         }
-        tools.set(t.name, t)
+        tools.set(name, t)
     }
 
     const server = new Server(

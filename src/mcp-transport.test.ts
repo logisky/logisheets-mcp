@@ -49,7 +49,7 @@ describe('MCP protocol surface', () => {
 
     it('advertises tools with valid JSON Schema and correct hints', async () => {
         const {tools} = await client.listTools()
-        expect(tools).toHaveLength(20)
+        expect(tools).toHaveLength(26)
 
         for (const t of tools) {
             expect(t.name).toMatch(/^[a-z][a-z0-9_]*$/)

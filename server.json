@@ -8,20 +8,20 @@
         "url": "https://github.com/logisky/logisheets-mcp",
         "source": "github"
     },
-    "version": "0.3.0",
+    "version": "0.4.0",
     "packages": [
         {
             "registryType": "npm",
             "registryBaseUrl": "https://registry.npmjs.org",
             "identifier": "logisheets-mcp",
-            "version": "0.3.0",
+            "version": "0.4.0",
             "transport": {
                 "type": "stdio"
             },
             "environmentVariables": [
                 {
                     "name": "LOGISHEETS_MCP_TOOLS",
-                    "description": "Tool surface: 'core' (default, 20 tools) or 'full', which adds formatting, comments, links, undo/redo and raw structure operations.",
+                    "description": "Tool surface: 'core' (default, 26 tools) or 'full', which adds formatting, comments, links, undo/redo and raw structure operations.",
                     "isRequired": false,
                     "isSecret": false
                 }

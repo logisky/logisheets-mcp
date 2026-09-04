@@ -44,11 +44,12 @@ function makeCaller(session: WorkbookSession, tools: Map<string, Tool>) {
     }
 }
 
-/** Every worksheet part of an .xlsx, concatenated. An .xlsx is a zip; reading
- *  the bytes is the only way to check what another spreadsheet would see. */
-function worksheetXml(buf: Buffer): string {
+/** Every part of an .xlsx whose name starts with `prefix`, as name -> text. An
+ *  .xlsx is a zip; reading the bytes is the only way to check what another
+ *  spreadsheet would see. */
+function xlsxParts(buf: Buffer, prefix: string): Map<string, string> {
     let i = 0
-    let out = ''
+    const out = new Map<string, string>()
     while (i + 30 <= buf.length && buf.readUInt32LE(i) === 0x04034b50) {
         const method = buf.readUInt16LE(i + 8)
         const size = buf.readUInt32LE(i + 18)
@@ -57,12 +58,22 @@ function worksheetXml(buf: Buffer): string {
         const name = buf.subarray(i + 30, i + 30 + nameLen).toString('utf8')
         const start = i + 30 + nameLen + extraLen
         const data = buf.subarray(start, start + size)
-        if (name.startsWith('xl/worksheets/sheet')) {
-            out += (method === 0 ? data : inflateRawSync(data)).toString('utf8')
+        // Skip the zip's directory entries (`xl/charts/`), which carry no
+        // content and would otherwise be counted as parts.
+        if (name.startsWith(prefix) && !name.endsWith('/')) {
+            out.set(
+                name,
+                (method === 0 ? data : inflateRawSync(data)).toString('utf8')
+            )
         }
         i = start + size
     }
     return out
+}
+
+/** Every worksheet part, concatenated. */
+function worksheetXml(buf: Buffer): string {
+    return [...xlsxParts(buf, 'xl/worksheets/sheet').values()].join('')
 }
 
 describe('logisheets-mcp agent loop', () => {
@@ -333,7 +344,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(20)
+        expect(names).toHaveLength(26)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -347,8 +358,16 @@ describe('logisheets-mcp agent loop', () => {
             'eval_formula',
             'describe_block',
             'save_workbook',
+            'chart_from_block',
         ]) {
             expect(names).toContain(n)
+        }
+        // Chart tools keep their namespace prefix: logician names them `list`,
+        // `insert`, `update` and `delete` inside it, and bare, they would sit
+        // next to `list_blocks`, `insert_rows` and `delete_rows` — which is
+        // the ambiguity the flat namespace is supposed to avoid.
+        for (const n of ['list', 'insert', 'update', 'delete', 'from_block']) {
+            expect(names).not.toContain(n)
         }
     })
 
@@ -363,6 +382,7 @@ describe('logisheets-mcp agent loop', () => {
         // …but the genuinely useful extras are in.
         expect(full.has('undo')).toBe(true)
         expect(full.has('list_violations')).toBe(true)
+        expect(full.has('chart_suggest')).toBe(true)
     })
 
     it('does not hallucinate arithmetic: the engine computes it', async () => {
@@ -1402,6 +1422,208 @@ describe('logisheets-mcp agent loop', () => {
             xlsx_base64: exported.base64,
         })
         expect(reopened.source).toBe('bytes')
+    })
+
+    /**
+     * A block's description is the only thing in the file that says what the
+     * records *mean* — the schema says what shape they are. It has to survive
+     * being written on creation, being rewritten afterwards, and above all a
+     * round trip through .xlsx, because the whole point is the session after
+     * this one.
+     */
+    it('carries a block description through save and reopen', async () => {
+        const written =
+            'One row per region. amt is USD thousands, not dollars. ' +
+            'Do not edit `share` — a field rule maintains it.'
+        await call('create_block', {
+            sheet: 'Rev',
+            name: 'rev',
+            description: written,
+            position: {row: 0, col: 0},
+            fields: [{name: 'region'}, {name: 'amt', field_type: 'number'}],
+            initial_rows: [
+                {key: 'North', values: {amt: 100}},
+                {key: 'South', values: {amt: 80}},
+            ],
+        })
+
+        const described = await call<{description: string | null}>(
+            'describe_block',
+            {name: 'rev'}
+        )
+        expect(described.description).toBe(written)
+
+        // The other half: a block adopted with `convert_to_block`, or one whose
+        // purpose only became clear later, has no inline description to set.
+        const rewritten = 'Quarterly revenue by region, USD thousands.'
+        await call('set_block_description', {
+            name: 'rev',
+            description: rewritten,
+        })
+        expect(
+            (await call<{description: string | null}>('describe_block', {
+                name: 'rev',
+            })).description
+        ).toBe(rewritten)
+
+        // And it is in the file, not just in this session.
+        const file = join(dir, 'described.xlsx')
+        await call('save_workbook', {path: file})
+        await call('open_workbook', {path: file})
+        expect(
+            (await call<{description: string | null}>('describe_block', {
+                name: 'rev',
+            })).description
+        ).toBe(rewritten)
+    })
+
+    /**
+     * The claim charting makes here is not "the agent produced a picture" — it
+     * is that the workbook holds a chart that reads its values from the cells,
+     * so the human changing an assumption in Excel gets a redrawn chart rather
+     * than a stale image. That is only true if the saved .xlsx contains a real
+     * `c:chartSpace` whose series are *references*, so that is what is checked.
+     */
+    it('charts a block by field name, live against the cells', async () => {
+        await call('create_block', {
+            sheet: 'Rev',
+            name: 'rev',
+            position: {row: 0, col: 0},
+            fields: [
+                {name: 'region'},
+                {name: 'q1', field_type: 'number'},
+                {name: 'q2', field_type: 'number'},
+            ],
+            initial_rows: [
+                {key: 'North', values: {q1: 100, q2: 130}},
+                {key: 'South', values: {q1: 80, q2: 95}},
+                {key: 'East', values: {q1: 140, q2: 150}},
+            ],
+        })
+
+        // The chart tools address a sheet by index, and `create_block` made the
+        // sheet — so the index comes from the workbook, not from a guess.
+        const groups = await call<
+            Array<{sheet_idx: number; blocks: Array<{block_id: number}>}>
+        >('list_blocks')
+        const group = groups.find((g) => g.blocks.length > 0)
+        expect(group).toBeDefined()
+        const sheetIdx = group!.sheet_idx
+        const blockId = group!.blocks[0]!.block_id
+
+        const made = await call<{chart_id: string; bound_to_block: number}>(
+            'chart_from_block',
+            {
+                sheetIdx,
+                blockId,
+                valueFields: ['q1', 'q2'],
+                categoryField: 'region',
+                chartType: 'col',
+                title: 'Revenue by region',
+            }
+        )
+        expect(made.bound_to_block).toBe(blockId)
+
+        const listed = await call<{
+            charts: Array<{
+                chart_id: string
+                type: string
+                title: string
+                series: Array<{name: string; value_ref: string}>
+            }>
+        }>('chart_list', {sheetIdx})
+        expect(listed.charts).toHaveLength(1)
+        expect(listed.charts[0]!.chart_id).toBe(made.chart_id)
+        expect(listed.charts[0]!.type).toBe('col')
+        expect(listed.charts[0]!.series.map((x) => x.name)).toEqual(['q1', 'q2'])
+        // References, not values — this is the whole point.
+        for (const ser of listed.charts[0]!.series) {
+            expect(ser.value_ref).toMatch(/^Rev!\$[A-Z]+\$\d+:\$[A-Z]+\$\d+$/)
+        }
+
+        // Correctable in place, without losing the chart.
+        await call('chart_update', {
+            sheetIdx,
+            chartId: made.chart_id,
+            chartType: 'line',
+            title: 'Revenue by region, quarterly',
+            legendPos: 'bottom',
+        })
+        const after = await call<{
+            charts: Array<{type: string; title: string}>
+        }>('chart_list', {sheetIdx})
+        expect(after.charts).toHaveLength(1)
+        expect(after.charts[0]!.type).toBe('line')
+        expect(after.charts[0]!.title).toBe('Revenue by region, quarterly')
+
+        // In the file Excel opens: a real chart part, with the series as
+        // references into the sheet rather than baked-in numbers.
+        const file = join(dir, 'charted.xlsx')
+        await call('save_workbook', {path: file})
+        const parts = xlsxParts(await readFile(file), 'xl/charts/')
+        expect(parts.size).toBe(1)
+        const chartXml = [...parts.values()][0]!
+        expect(chartXml).toContain('c:chartSpace')
+        expect(chartXml).toContain('Revenue by region, quarterly')
+        expect(chartXml).toContain('<c:f>Rev!$B$1:$B$3</c:f>')
+        expect(chartXml).toContain('<c:f>Rev!$C$1:$C$3</c:f>')
+
+        // The claim that separates `chart_from_block` from charting a range:
+        // the series is bound to the field, so a record added later is in the
+        // chart without anyone re-pointing it.
+        await call('add_block_rows', {
+            block: 'rev',
+            rows: [{key: 'West', values: {q1: 60, q2: 75}}],
+        })
+        const grown = await call<{
+            charts: Array<{series: Array<{value_ref: string; point_count: number}>}>
+        }>('chart_list', {sheetIdx})
+        expect(grown.charts[0]!.series.map((x) => x.value_ref)).toEqual([
+            'Rev!$B$1:$B$4',
+            'Rev!$C$1:$C$4',
+        ])
+        expect(grown.charts[0]!.series.map((x) => x.point_count)).toEqual([4, 4])
+    })
+
+    /**
+     * `chart_insert` is the raw-range counterpart, for the same data that would
+     * reach for `set_cells`, and `chart_delete` is what makes a first guess
+     * non-permanent: `chart_update` cannot move a chart to another sheet, so
+     * without delete a chart placed wrongly stays in the deliverable.
+     */
+    it('inserts a chart over raw cells and can take it back out', async () => {
+        await call('set_cells', {
+            sheetIdx: 0,
+            cells: [
+                {row: 0, col: 0, content: 'Jan'},
+                {row: 1, col: 0, content: 'Feb'},
+                {row: 2, col: 0, content: 'Mar'},
+                {row: 0, col: 1, content: '10'},
+                {row: 1, col: 1, content: '14'},
+                {row: 2, col: 1, content: '19'},
+            ],
+        })
+
+        const made = await call<{chart_id: string}>('chart_insert', {
+            sheetIdx: 0,
+            chartType: 'line',
+            series: [{name: 'Units', valueRef: 'B1:B3'}],
+            categoriesRef: 'A1:A3',
+            title: 'Units by month',
+        })
+        expect(
+            (await call<{charts: unknown[]}>('chart_list', {sheetIdx: 0})).charts
+        ).toHaveLength(1)
+
+        await call('chart_delete', {sheetIdx: 0, chartId: made.chart_id})
+        expect(
+            (await call<{charts: unknown[]}>('chart_list', {sheetIdx: 0})).charts
+        ).toHaveLength(0)
+
+        // Gone from the file too, not merely hidden from the listing.
+        const file = join(dir, 'uncharted.xlsx')
+        await call('save_workbook', {path: file})
+        expect(xlsxParts(await readFile(file), 'xl/charts/').size).toBe(0)
     })
 
     it('reports a bad tool argument as a usable error, not a crash', async () => {
