@@ -9,6 +9,7 @@ import {readFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {describe, it, expect} from 'vitest'
+import {SERVER_VERSION} from './server.js'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -45,6 +46,17 @@ describe('registry manifest', () => {
         // Only the public registry is accepted.
         expect(npm.registryBaseUrl).toBe('https://registry.npmjs.org')
         expect(npm.registryType).toBe('npm')
+    })
+
+    /**
+     * The version the server announces is the one thing here a host actually
+     * sees at runtime — it goes out in the `initialize` handshake and in
+     * `--version`. It was hardcoded, and sat at 0.1.0 through four releases
+     * while every other copy moved.
+     */
+    it('announces the package version over the protocol', async () => {
+        const pkg = await readJson('package.json')
+        expect(SERVER_VERSION).toBe(pkg.version)
     })
 
     it('declares the environment variables the server actually reads', async () => {

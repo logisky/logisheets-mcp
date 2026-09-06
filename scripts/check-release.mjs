@@ -70,6 +70,18 @@ if (pkg.bin?.['logisheets-mcp'] === undefined) {
     problems.push('package.json bin.logisheets-mcp is missing — hosts spawn it by name')
 }
 
+// The version the built server will actually announce in the MCP handshake.
+// It is derived from package.json now, but this is the copy that reaches
+// hosts, so check the artifact rather than trusting the derivation.
+try {
+    const {SERVER_VERSION} = await import(new URL('../dist/server.js', import.meta.url))
+    eq('dist SERVER_VERSION', SERVER_VERSION, expected)
+} catch (err) {
+    problems.push(
+        `cannot read SERVER_VERSION from dist/server.js (run the build first): ${err.message}`
+    )
+}
+
 if (problems.length > 0) {
     console.error('check-release: not ready to publish')
     for (const p of problems) console.error(`  - ${p}`)

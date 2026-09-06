@@ -8,6 +8,9 @@
  * through a Zod translation layer.
  */
 
+import {readFileSync} from 'node:fs'
+import {dirname, join} from 'node:path'
+import {fileURLToPath} from 'node:url'
 import {Server} from '@modelcontextprotocol/sdk/server/index.js'
 import {
     CallToolRequestSchema,
@@ -30,7 +33,43 @@ import {
 } from './lifecycle.js'
 
 export const SERVER_NAME = 'logisheets'
-export const SERVER_VERSION = '0.1.0'
+
+/**
+ * The server's version, read from the package rather than restated here.
+ *
+ * It goes out in the MCP `initialize` handshake and in `--version`, so a second
+ * copy is a copy that drifts — this one sat at `0.1.0` while the package went
+ * to 0.4.x, telling every host the wrong thing.
+ *
+ * Both `src/server.ts` under vitest and the built `dist/server.js` sit one
+ * directory below the package root, so the same relative path finds
+ * package.json either way. npm always ships it, so a read that fails means a
+ * broken install and should say so at startup rather than later.
+ */
+function readVersion(): string {
+    const path = join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'package.json'
+    )
+    let raw: string
+    try {
+        raw = readFileSync(path, 'utf8')
+    } catch (err) {
+        throw new Error(
+            `cannot read ${path} for the server version: ${
+                err instanceof Error ? err.message : String(err)
+            }`
+        )
+    }
+    const {version} = JSON.parse(raw) as {version?: unknown}
+    if (typeof version !== 'string' || version === '') {
+        throw new Error(`${path} has no usable "version"`)
+    }
+    return version
+}
+
+export const SERVER_VERSION = readVersion()
 
 /**
  * How the agent should approach this server. Sent as MCP `instructions`, so a
