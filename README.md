@@ -209,7 +209,7 @@ every claim as it goes.
 
 ## Tools
 
-Twenty-six by default. Tool-selection accuracy falls as the list grows and
+Thirty-one by default. Tool-selection accuracy falls as the list grows and
 every description costs context on every turn.
 
 | Tool | What it does |
@@ -228,6 +228,11 @@ every description costs context on every turn.
 | `move_block_row` | Reorder rows by key. Presentation only: no value changes. |
 | `set_block_cells` | Write cells by `(block, row_key, field)`. Batched, atomic. |
 | `set_field_rule` | Give a field a formula, a validation rule, or an editability rule. |
+| `create_analysis_block` | A totals row under a table, generated from a recipe rather than written. |
+| `edit_analysis_block` | Change which fields it aggregates and how, keeping the ref name. |
+| `create_pivot` | Cross-tabulate a block: one row per group, one column per value, live. |
+| `edit_pivot` | Reshape a pivot in place — and the only way to repair a broken one. |
+| `refresh_pivot` | Bring a pivot's rows and columns back in line with its source. |
 | `list_violations` | Which cells break their field's validation rule, and why. |
 | `preview_changes` | What edits *would* do, without doing them — one hypothetical, or a whole grid of scenarios in a single call. |
 | `trace` | What a cell reads, and what reads it, from the dependency graph. |
@@ -252,7 +257,23 @@ the workbook, and an inverse solve is one call rather than one per bisection
 step. `trace` answers the question formula text cannot — not what a cell reads,
 but what reads *it*, which is what you want before touching an assumption.
 
-Set `LOGISHEETS_MCP_TOOLS=full` for 64: undo/redo, formatting, merges, comments,
+Analysis blocks and pivots are summaries the engine *derives*. The agent
+declares a recipe — which block, which fields, which function — and the engine
+generates every formula from it, so renaming a source field rebuilds the summary
+instead of breaking it, and a row added later is already counted. Both land in
+ordinary blocks, so `BLOCKREF("by_region", "East", "Q2")` is one cell of a
+cross-tab and can feed the next calculation. The alternative an agent reaches
+for otherwise is reading the table into its context, adding it up and writing
+the answer down, which produces a constant that is wrong from the next row on.
+
+One thing about pivots is worth knowing before trusting one: the numbers are
+live, but the *shape* is not. No formula can add a row, so a group that first
+appears in the source after the pivot was built is simply absent — every number
+correct, the table incomplete, nothing that looks wrong. `describe_block` names
+the missing groups and `refresh_pivot` reinstates them, which is why the pair
+ships in the core surface rather than behind the flag.
+
+Set `LOGISHEETS_MCP_TOOLS=full` for 69: undo/redo, formatting, merges, comments,
 checkpoints, block move/resize, cross-block links, block permissions,
 `chart_suggest`, raw row/column structure. Mutating tools carry MCP's
 `readOnlyHint` / `destructiveHint` annotations so a host can gate them behind

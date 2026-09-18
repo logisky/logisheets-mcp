@@ -1,13 +1,13 @@
 /**
  * Which tools this server exposes.
  *
- * logician ships ~55 tools, built for an in-app assistant with a UI. Handing an
+ * logician ships ~75 tools, built for an in-app assistant with a UI. Handing an
  * agent all of them is a real cost: tool-selection accuracy falls as the list
  * grows, and every description is context the agent pays for on every turn. So
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 26 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 31 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -96,6 +96,39 @@ const CORE_IDS: readonly string[] = [
     'build__move_block_row',
     'edit__set_block_cells',
     'build__set_field_rule',
+    // Derived blocks: the engine computing a summary from a table, rather than
+    // the agent reading the rows into its context, doing the arithmetic in its
+    // head and writing the answer down as a constant. Both kinds take a
+    // *recipe* — which block, which fields, which function — and generate every
+    // formula from it, so renaming a source field rebuilds the summary instead
+    // of breaking it. And both land in ordinary blocks, which is the part that
+    // matters here: a total or one cell of a cross-tab is addressable by
+    // BLOCKREF, so it can be quoted in a sentence or feed the next calculation
+    // instead of only being looked at.
+    'build__create_analysis_block',
+    // The correction path, and what makes the first attempt worth making:
+    // SUM over every number column is usually nearly right and wrong in one
+    // place — a rate wants AVERAGE, a text column COUNTA, an id column nothing
+    // at all. Editing keeps the ref name, so formulas already pointing at the
+    // total survive it being fixed.
+    'build__edit_analysis_block',
+    // One number per group rather than one number per table. Same bargain as
+    // `chart_from_block`: declare it against field names and it follows the
+    // data, which is why this belongs next to the engine rather than in the
+    // model's head.
+    'build__create_pivot',
+    // Correct *and* repair. A pivot whose recipe stopped resolving — a renamed
+    // source field — reads 0 in every cell rather than erroring, and this is
+    // the only way back; a refresh fails the same way. Without it a wrong first
+    // guess is permanent in the file the human is handed.
+    'build__edit_pivot',
+    // A pivot's numbers are live but its SHAPE is not: no formula can add a
+    // row, so values that appear in the source after it was built get no group.
+    // The failure mode is the dangerous kind — correct numbers, whole groups
+    // missing, nothing that looks wrong. `describe_block` reports when it has
+    // happened, so leaving this out would tell the agent about a problem it
+    // could not fix.
+    'build__refresh_pivot',
     // Sheets
     'build__create_sheet',
     // Raw-cell escape hatch

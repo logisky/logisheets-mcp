@@ -344,7 +344,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(26)
+        expect(names).toHaveLength(31)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -359,6 +359,7 @@ describe('logisheets-mcp agent loop', () => {
             'describe_block',
             'save_workbook',
             'chart_from_block',
+            'create_pivot',
         ]) {
             expect(names).toContain(n)
         }
@@ -1475,6 +1476,231 @@ describe('logisheets-mcp agent loop', () => {
                 name: 'rev',
             })).description
         ).toBe(rewritten)
+    })
+
+    /**
+     * A total the engine derives, not one the model computes. The distinction
+     * the test has to catch is that the summary is a *recipe*, not a number: it
+     * has to be addressable like any other block cell, and it has to still be
+     * right after the source grows — which a constant the model wrote down
+     * would not be.
+     */
+    it('totals a block with a block, addressable and still right after a new row', async () => {
+        await call('create_block', {
+            sheet: 'Sales',
+            name: 'sales',
+            position: {row: 0, col: 0},
+            fields: [
+                {name: 'id'},
+                {name: 'region'},
+                {name: 'amount', field_type: 'number'},
+                {name: 'margin', field_type: 'number'},
+            ],
+            initial_rows: [
+                {key: 'o1', values: {region: 'East', amount: 100, margin: 0.4}},
+                {key: 'o2', values: {region: 'West', amount: 80, margin: 0.2}},
+            ],
+        })
+
+        // Defaults: SUM every field the source declares as a number, and
+        // nothing else. That is right for `amount` and wrong for `margin`.
+        const made = await call<{block: string; aggregated: string[]}>(
+            'create_analysis_block',
+            {source: 'sales'}
+        )
+        expect(made.block).toBe('sales_analysis')
+        expect(made.aggregated).toEqual(['SUM of amount', 'SUM of margin'])
+
+        // The relationship is readable from both ends, which is what lets a
+        // later session tell a total apart from another table of numbers —
+        // and know not to add it to the source.
+        expect(
+            (await call<{analyzes: string}>('describe_block', {
+                name: 'sales_analysis',
+            })).analyzes
+        ).toBe('sales')
+        expect(
+            (await call<{analyzed_by: string[]}>('describe_block', {
+                name: 'sales',
+            })).analyzed_by
+        ).toEqual(['sales_analysis'])
+
+        // Addressable by name, which is the whole reason it is a block rather
+        // than a number in the model's reply.
+        const total = await call<{type: string; value: number}>('eval_formula', {
+            expr: '=BLOCKREF("sales_analysis","TOTAL","amount")',
+        })
+        expect(total.value).toBe(180)
+
+        // Adjusted rather than rebuilt: a rate wants AVERAGE, and the ref name
+        // survives the fix, so the formula above keeps resolving.
+        const edited = await call<{aggregated: string[]}>(
+            'edit_analysis_block',
+            {
+                name: 'sales_analysis',
+                aggregates: [
+                    {field: 'amount', func: 'SUM'},
+                    {field: 'margin', func: 'AVERAGE'},
+                ],
+                label: 'ALL',
+            }
+        )
+        expect(edited.aggregated).toEqual(['SUM of amount', 'AVERAGE of margin'])
+        expect(
+            (await call<{keys: string[]}>('describe_block', {
+                name: 'sales_analysis',
+            })).keys
+        ).toEqual(['ALL'])
+        expect(
+            (await call<{value: number}>('eval_formula', {
+                expr: '=BLOCKREF("sales_analysis","ALL","margin")',
+            })).value
+        ).toBeCloseTo(0.3)
+
+        // The claim that separates this from arithmetic done in context: a row
+        // added afterwards is in the total with nobody recomputing anything.
+        await call('add_block_rows', {
+            block: 'sales',
+            rows: [{key: 'o3', values: {region: 'East', amount: 20, margin: 0.6}}],
+        })
+        expect(
+            (await call<{value: number}>('eval_formula', {
+                expr: '=BLOCKREF("sales_analysis","ALL","amount")',
+            })).value
+        ).toBe(200)
+    })
+
+    /**
+     * A pivot has a failure mode nothing else here has, and it is the one worth
+     * testing: its numbers are live but its shape is not, so a group that
+     * appears in the source after it was built is simply absent — correct
+     * numbers, incomplete table, nothing that looks wrong. The engine has to
+     * say so, and the agent has to be able to fix it.
+     */
+    it('cross-tabulates a block, and says so when its shape falls behind', async () => {
+        await call('create_block', {
+            sheet: 'Sales',
+            name: 'sales',
+            position: {row: 0, col: 0},
+            fields: [
+                {name: 'id'},
+                {name: 'region'},
+                {name: 'quarter'},
+                {name: 'amount', field_type: 'number'},
+            ],
+            initial_rows: [
+                {key: 'o1', values: {region: 'East', quarter: 'Q1', amount: 100}},
+                {key: 'o2', values: {region: 'West', quarter: 'Q1', amount: 80}},
+                {key: 'o3', values: {region: 'East', quarter: 'Q2', amount: 140}},
+                {key: 'o4', values: {region: 'West', quarter: 'Q2', amount: 60}},
+            ],
+        })
+
+        const made = await call<{
+            block: string
+            rows: string[]
+            columns: string[]
+            unassigned_records: number
+        }>('create_pivot', {
+            source: 'sales',
+            rows: 'region',
+            columns: 'quarter',
+            measure: 'amount',
+            name: 'by_region',
+            row_total: 'Total',
+        })
+        expect(made.rows).toEqual(['East', 'West'])
+        expect(made.columns).toEqual(['Q1', 'Q2', 'Total'])
+        expect(made.unassigned_records).toBe(0)
+
+        // One cell of the cross-tab, by name. This is what lets a number from a
+        // pivot be quoted or fed forward instead of only looked at.
+        expect(
+            (await call<{value: number}>('eval_formula', {
+                expr: '=BLOCKREF("by_region","East","Q2")',
+            })).value
+        ).toBe(140)
+        expect(
+            (await call<{value: number}>('eval_formula', {
+                expr: '=BLOCKREF("by_region","East","Total")',
+            })).value
+        ).toBe(240)
+
+        // A region nobody had sold in yet. No formula can add a row, so the
+        // pivot's shape is now behind its source.
+        await call('add_block_rows', {
+            block: 'sales',
+            rows: [
+                {key: 'o5', values: {region: 'North', quarter: 'Q1', amount: 55}},
+            ],
+        })
+        const stale = await call<{pivot_is_stale?: string; keys: string[]}>(
+            'describe_block',
+            {name: 'by_region'}
+        )
+        // The engine names the missing group rather than merely flagging that
+        // something is off — an agent that has to diff two tables to find out
+        // will not bother.
+        expect(stale.pivot_is_stale).toMatch(/North/)
+        expect(stale.keys).toEqual(['East', 'West'])
+
+        const refreshed = await call<{changed: boolean; added_rows: string[]}>(
+            'refresh_pivot',
+            {name: 'by_region'}
+        )
+        expect(refreshed.changed).toBe(true)
+        expect(refreshed.added_rows).toEqual(['North'])
+        const after = await call<{
+            pivot_is_stale?: string
+            keys: string[]
+            fields: Array<{name: string}>
+        }>('describe_block', {name: 'by_region'})
+        expect(after.pivot_is_stale).toBeUndefined()
+        expect(after.keys).toEqual(['East', 'North', 'West'])
+
+        // A refresh must not disturb the headings. This is not cosmetic: if the
+        // key column takes the first measure's name the block has two fields
+        // called `Q1`, and the lookup below resolves against the key column and
+        // answers "North" — a call that looks right returning the wrong thing,
+        // which is the one failure the whole named-addressing idea exists to
+        // rule out.
+        expect(after.fields.map((f) => f.name)).toEqual([
+            'region',
+            'Q1',
+            'Q2',
+            'Total',
+        ])
+        expect(
+            (await call<{value: number}>('eval_formula', {
+                expr: '=BLOCKREF("by_region","North","Q1")',
+            })).value
+        ).toBe(55)
+
+        // Cheap and honest when there is nothing to do, so it is safe to call
+        // before reading one.
+        expect(
+            (await call<{changed: boolean}>('refresh_pivot', {name: 'by_region'}))
+                .changed
+        ).toBe(false)
+
+        // Reshaped in place: cross-tab to a filtered group-by, keeping the ref
+        // name so anything pointing at it survives.
+        const reshaped = await call<{rows: string[]; columns: string[]}>(
+            'edit_pivot',
+            {
+                name: 'by_region',
+                columns: null,
+                filters: [{field: 'amount', criteria: '>70'}],
+            }
+        )
+        expect(reshaped.columns).not.toContain('Q2')
+        // The filter is part of the recipe, so `describe_block` reports it —
+        // a number read off a filtered pivot without knowing it is filtered is
+        // the wrong number.
+        expect(
+            (await call<{pivot: string}>('describe_block', {name: 'by_region'}))
+                .pivot
+        ).toMatch(/amount >70/)
     })
 
     /**
