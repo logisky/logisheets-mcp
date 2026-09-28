@@ -1,13 +1,13 @@
 /**
  * Which tools this server exposes.
  *
- * logician ships ~75 tools, built for an in-app assistant with a UI. Handing an
+ * logician ships ~79 tools, built for an in-app assistant with a UI. Handing an
  * agent all of them is a real cost: tool-selection accuracy falls as the list
  * grows, and every description is context the agent pays for on every turn. So
  * the default is a deliberate core — the loop from the design doc and nothing
  * else — with the rest available behind an env flag.
  *
- *   LOGISHEETS_MCP_TOOLS=core   (default) the 31 below
+ *   LOGISHEETS_MCP_TOOLS=core   (default) the 32 below
  *   LOGISHEETS_MCP_TOOLS=full   everything except the browser-only tools
  */
 
@@ -22,6 +22,7 @@ import {
     HISTORY_TOOLS,
     INSPECT_TOOLS,
     LINK_TOOLS,
+    NAME_TOOLS,
     STRUCTURE_TOOLS,
     toolId,
 } from 'logisheets-logician'
@@ -138,6 +139,18 @@ const CORE_IDS: readonly string[] = [
     // to see what breaks it — without it, validation is write-only and the
     // agent has no way to check its own work.
     'inspect__list_violations',
+    // Defined names are the one thing in a workbook someone else built that a
+    // formula can reference and nothing else here can explain. Reading
+    // `=SUM(Sales)` with no way to ask what `Sales` covers leaves the agent
+    // guessing at the model it was handed. Read-only and cheap — an empty
+    // schema and one line of description.
+    //
+    // Its three mutating siblings stay behind the flag on purpose. A defined
+    // name is a *coordinate* range wearing a label: it does not grow when rows
+    // are added, which is the exact fragility blocks exist to remove. Reading
+    // them is orientation; reaching for them to build with would be the agent
+    // routing around the better tool.
+    'name__list_names',
     // Answering "what would happen if…" without changing anything. Read-only:
     // it runs the edits on the engine's temp branch, reports the whole cascade
     // and discards them. Without it the only way to explore is to mutate and
@@ -209,6 +222,7 @@ function allEngineTools(): Tool[] {
         ...BLOCK_OPS_TOOLS,
         ...LINK_TOOLS,
         ...CHART_TOOLS,
+        ...NAME_TOOLS,
     ]
 }
 

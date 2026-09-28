@@ -49,7 +49,7 @@ describe('MCP protocol surface', () => {
 
     it('advertises tools with valid JSON Schema and correct hints', async () => {
         const {tools} = await client.listTools()
-        expect(tools).toHaveLength(31)
+        expect(tools).toHaveLength(32)
 
         for (const t of tools) {
             expect(t.name).toMatch(/^[a-z][a-z0-9_]*$/)
@@ -243,7 +243,11 @@ describe('MCP protocol surface', () => {
         })
         expect(bad.isError).toBe(true)
         const msg = text(bad as CallToolResult)
-        expect(msg).toContain('exceeds the maximum')
+        // 1.16.0 made this considerably more useful: the message now names the
+        // tool and which payload of the batch was rejected, and says what was
+        // wrong in words rather than restating an index.
+        expect(msg).toContain('delete_sheet')
+        expect(msg).toContain('out of range')
         expect(msg).not.toContain('status code')
         await host.close()
     })

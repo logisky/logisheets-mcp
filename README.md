@@ -209,7 +209,7 @@ every claim as it goes.
 
 ## Tools
 
-Thirty-one by default. Tool-selection accuracy falls as the list grows and
+Thirty-two by default. Tool-selection accuracy falls as the list grows and
 every description costs context on every turn.
 
 | Tool | What it does |
@@ -234,6 +234,7 @@ every description costs context on every turn.
 | `edit_pivot` | Reshape a pivot in place — and the only way to repair a broken one. |
 | `refresh_pivot` | Bring a pivot's rows and columns back in line with its source. |
 | `list_violations` | Which cells break their field's validation rule, and why. |
+| `list_names` | The workbook's defined names, and what each one refers to. |
 | `preview_changes` | What edits *would* do, without doing them — one hypothetical, or a whole grid of scenarios in a single call. |
 | `trace` | What a cell reads, and what reads it, from the dependency graph. |
 | `goal_seek` | What input makes an output hit a target. Searches inside the engine. |
@@ -266,6 +267,14 @@ cross-tab and can feed the next calculation. The alternative an agent reaches
 for otherwise is reading the table into its context, adding it up and writing
 the answer down, which produces a constant that is wrong from the next row on.
 
+`list_names` is in the core surface and the three tools that *write* defined
+names are not, which is deliberate. A defined name is a coordinate range with a
+label on it: `Sales = Sheet1!$B$2:$B$20` does not grow when a row is added,
+which is precisely the fragility blocks exist to remove. But a workbook someone
+else built may be full of them, and `=SUM(Sales)` cannot be read without
+knowing what `Sales` covers — so reading them is orientation, and building with
+them is reaching past the better tool.
+
 One thing about pivots is worth knowing before trusting one: the numbers are
 live, but the *shape* is not. No formula can add a row, so a group that first
 appears in the source after the pivot was built is simply absent — every number
@@ -273,9 +282,9 @@ correct, the table incomplete, nothing that looks wrong. `describe_block` names
 the missing groups and `refresh_pivot` reinstates them, which is why the pair
 ships in the core surface rather than behind the flag.
 
-Set `LOGISHEETS_MCP_TOOLS=full` for 69: undo/redo, formatting, merges, comments,
+Set `LOGISHEETS_MCP_TOOLS=full` for 73: undo/redo, formatting, merges, comments,
 checkpoints, block move/resize, cross-block links, block permissions,
-`chart_suggest`, raw row/column structure. Mutating tools carry MCP's
+`chart_suggest`, defining and renaming names, raw row/column structure. Mutating tools carry MCP's
 `readOnlyHint` / `destructiveHint` annotations so a host can gate them behind
 approval.
 

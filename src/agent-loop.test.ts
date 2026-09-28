@@ -344,7 +344,7 @@ describe('logisheets-mcp agent loop', () => {
     it('exposes a small core surface with clean, unique names', () => {
         const {tools} = createServer({mode: 'core'})
         const names = [...tools.keys()]
-        expect(names).toHaveLength(31)
+        expect(names).toHaveLength(32)
         expect(new Set(names).size).toBe(names.length)
         // No namespace prefixes leaked into the model-facing names.
         expect(names.filter((n) => n.includes('__'))).toEqual([])
@@ -360,8 +360,15 @@ describe('logisheets-mcp agent loop', () => {
             'save_workbook',
             'chart_from_block',
             'create_pivot',
+            'list_names',
         ]) {
             expect(names).toContain(n)
+        }
+        // Reading a workbook's defined names is orientation; creating them is
+        // reaching past blocks for a coordinate range with a label on it, so
+        // those three stay behind the flag.
+        for (const n of ['define_name', 'rename_name', 'delete_name']) {
+            expect(names).not.toContain(n)
         }
         // Chart tools keep their namespace prefix: logician names them `list`,
         // `insert`, `update` and `delete` inside it, and bare, they would sit
@@ -1701,6 +1708,97 @@ describe('logisheets-mcp agent loop', () => {
             (await call<{pivot: string}>('describe_block', {name: 'by_region'}))
                 .pivot
         ).toMatch(/amount >70/)
+    })
+
+    /**
+     * Defined names are the half of a stranger's workbook that nothing else on
+     * the surface can explain: `=SUM(Sales)` is unreadable without asking what
+     * `Sales` covers. `list_names` is in the core surface for exactly that, and
+     * the three that write are behind the flag — so this drives both halves.
+     */
+    it('reads the defined names a workbook came with, and can maintain them', async () => {
+        const {session: s, tools} = createServer({mode: 'full', log: () => {}})
+        const run = makeCaller(s, tools)
+        try {
+            await run('set_cells', {
+                sheetIdx: 0,
+                cells: [
+                    {row: 0, col: 1, content: '10'},
+                    {row: 1, col: 1, content: '14'},
+                    {row: 2, col: 1, content: '19'},
+                ],
+            })
+            await run('define_name', {
+                name: 'Sales',
+                refersTo: 'Sheet1!$B$1:$B$3',
+            })
+            // A name can stand for a constant as well as a range, which is how
+            // an assumption gets one place to live.
+            await run('define_name', {name: 'TaxRate', refersTo: '0.08'})
+
+            // The orientation half: what a formula's names actually cover.
+            const listed = await run<{
+                names: Array<{name: string; refersTo: string}>
+            }>('list_names')
+            expect(
+                listed.names.map((n) => [n.name, n.refersTo])
+            ).toEqual([
+                ['Sales', 'Sheet1!$B$1:$B$3'],
+                ['TaxRate', '0.08'],
+            ])
+
+            // Usable as a reference, which is the only reason to read them.
+            expect(
+                (await run<{value: number}>('eval_formula', {
+                    expr: '=SUM(Sales)',
+                })).value
+            ).toBe(43)
+            expect(
+                (await run<{value: number}>('eval_formula', {
+                    expr: '=TaxRate*100',
+                })).value
+            ).toBe(8)
+
+            // A rename carries the formulas with it — nothing to rewrite, which
+            // is the same guarantee blocks give and the reason renaming is safe
+            // to offer at all.
+            await run('set_cells', {
+                sheetIdx: 0,
+                cells: [{row: 0, col: 3, content: '=SUM(Sales)'}],
+            })
+            await run('rename_name', {oldName: 'Sales', newName: 'Revenue'})
+            const cell = await run<{
+                cells: Array<{formula?: string; value: unknown}>
+            }>('get_cells', {
+                sheetIdx: 0,
+                startRow: 0,
+                startCol: 3,
+                endRow: 0,
+                endCol: 3,
+            })
+            expect(cell.cells[0]!.formula).toContain('Revenue')
+            expect(cell.cells[0]!.value).toBe(43)
+
+            // And they are in the file, not just in this session — otherwise
+            // reading them back on a later pass would be reading nothing.
+            const file = join(dir, 'named.xlsx')
+            await run('save_workbook', {path: file})
+            await run('open_workbook', {path: file})
+            expect(
+                (await run<{names: Array<{name: string}>}>('list_names')).names.map(
+                    (n) => n.name
+                )
+            ).toEqual(['Revenue', 'TaxRate'])
+
+            await run('delete_name', {name: 'TaxRate'})
+            expect(
+                (await run<{names: Array<{name: string}>}>('list_names')).names.map(
+                    (n) => n.name
+                )
+            ).toEqual(['Revenue'])
+        } finally {
+            s.close()
+        }
     })
 
     /**
